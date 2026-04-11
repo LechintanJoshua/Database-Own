@@ -176,7 +176,9 @@ func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
 	new.setOffset(idx+1, new.getOffset(idx)+4+uint16(len(key)+len(val)))
 }
 
-// copieaza multiple kv-uri in pozitie de la nodul vechi
+// nodeAppendRange copiaza in noul nod, datele de la vechiul nod
+// incepand de la un index dstNew (pentru noul nod) si incepand
+// de la srcOld (pentru vechiul nod)
 func nodeAppendRange(
 	new BNode, old BNode,
 	dstNew uint16, srcOld uint16, n uint16,
@@ -190,7 +192,8 @@ func nodeAppendRange(
 	}
 }
 
-// schimbarea unui link cu 1 sau mai multe linkuri
+// nodeReplaceKidN schimba linkurile unui nod divizat
+// cu 1 sau mai multe
 func nodeReplaceKidN(
 	tree *BTree, new BNode, old BNode, idx uint16,
 	kids ...BNode,
@@ -205,4 +208,42 @@ func nodeReplaceKidN(
 	}
 
 	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
+}
+
+// nodeSplit2 divizeaza un nod mare in 2 noduri
+// care vor respecta dimensiunea paginii de memorie
+func nodeSplit2(left BNode, right BNode, old BNode) {
+	// gaseste indexul din mijloc al nodului old si
+	// divizeazal in doua
+	mid := old.nkeys() / 2
+	left.setHeader(old.btype(), mid)
+	right.setHeader(old.btype(), old.nkeys()-mid)
+
+	nodeAppendRange(left, old, 0, 0, mid)
+	nodeAppendRange(right, old, 0, mid, old.nkeys()-mid)
+}
+
+// nodeSplit3 verifica dimensiunea unui nod si il divizeaza
+// corespunzator.
+// Deloc daca este in limita, in 2, sau in 3
+func nodeSplit3(old BNode) (uint16, [3]BNode) {
+	if old.nbytes() <= BTREE_PAGE_SIZE {
+		old = old[:BTREE_PAGE_SIZE]
+		return 1, [3]BNode{old} // ne-divizat
+	}
+
+	left := BNode(make([]byte, 2*BTREE_PAGE_SIZE)) //poate fi divizat mai tarziu
+	right := BNode(make([]byte, BTREE_PAGE_SIZE))
+	nodeSplit2(left, right, old)
+
+	if left.nbytes() <= BTREE_PAGE_SIZE {
+		left = left[:BTREE_PAGE_SIZE]
+		return 2, [3]BNode{left, right} // 2 noduri
+	}
+
+	leftleft := BNode(make([]byte, BTREE_PAGE_SIZE))
+	middle := BNode(make([]byte, BTREE_PAGE_SIZE))
+	nodeSplit2(leftleft, middle, left)
+	assert(leftleft.nbytes() <= BTREE_PAGE_SIZE)
+	return 3, [3]BNode{leftleft, middle, right} // 3 noduri
 }
