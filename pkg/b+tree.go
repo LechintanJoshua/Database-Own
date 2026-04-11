@@ -130,8 +130,8 @@ func nodeLookupLE(node BNode, key []byte) uint16 {
 	nkeys := node.nkeys()
 	found := uint16(0)
 
-	//the first key is the copy from the parent node,
-	//thus it's always less than or equal to the key.
+	// prima cheie este copia de la nodul parinte\
+	// deci mereu mai mica sau egala cu cheia cautata
 
 	for i := uint16(1); i < nkeys; i++ {
 		cmp := bytes.Compare(node.getKey(i), key)
@@ -146,4 +146,63 @@ func nodeLookupLE(node BNode, key []byte) uint16 {
 	}
 
 	return found
+}
+
+// leafInsert copiaza datele din vechiul nod in cel nou,
+// si introduce cheia si val la locul ei (copy-on-write)
+func leafInsert(
+	new BNode, old BNode, idx uint16,
+	key []byte, val []byte,
+) {
+	new.setHeader(BNODE_LEAF, old.nkeys()+1) //setarea header-ului
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendKV(new, idx, 0, key, val)
+	nodeAppendRange(new, old, idx+1, idx, old.nkeys()-idx)
+}
+
+// nodeAppendKV adauga in nod la un anumit index o noua pereche
+// KV impreuna cu pointerul
+func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
+	// pointeri
+	new.setPtr(idx, ptr)
+	//KV
+	pos := new.kvPos(idx)
+	binary.LittleEndian.PutUint16(new[pos+0:], uint16(len(key)))
+	binary.LittleEndian.PutUint16(new[pos+2:], uint16(len(val)))
+	copy(new[pos+4:], key)
+	copy(new[pos+4+uint16(len(key)):], val)
+
+	//offsetul cheii urmatoare
+	new.setOffset(idx+1, new.getOffset(idx)+4+uint16(len(key)+len(val)))
+}
+
+// copieaza multiple kv-uri in pozitie de la nodul vechi
+func nodeAppendRange(
+	new BNode, old BNode,
+	dstNew uint16, srcOld uint16, n uint16,
+) {
+	for i := uint16(0); i < n; i++ {
+		key := old.getKey(srcOld + i)
+		val := old.getVal(srcOld + i)
+		ptr := old.getPtr(srcOld + i)
+
+		nodeAppendKV(new, dstNew+i, ptr, key, val)
+	}
+}
+
+// schimbarea unui link cu 1 sau mai multe linkuri
+func nodeReplaceKidN(
+	tree *BTree, new BNode, old BNode, idx uint16,
+	kids ...BNode,
+) {
+	inc := uint16(len(kids))
+	new.setHeader(BNODE_NODE, old.nkeys()+inc-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+
+	for i, node := range kids {
+		nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil)
+		// 					^pozitie		^pointer		^cheie			^val
+	}
+
+	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
 }
