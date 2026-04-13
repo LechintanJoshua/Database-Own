@@ -123,26 +123,28 @@ func (node BNode) nbytes() uint16 {
 }
 
 // return the first kid node whose range intersects the key (kid[i] <= key)
-// TODO: binary search
 // nodeLookupLE parcurge indexii noduri si verifica valoarea
 // cu cheia data ca parametru pana cand aceasta este <=
 func nodeLookupLE(node BNode, key []byte) uint16 {
-	nkeys := node.nkeys()
+	nkeys := node.nkeys() - 1
+	fskey := uint16(1)
 	found := uint16(0)
 
-	// prima cheie este copia de la nodul parinte\
-	// deci mereu mai mica sau egala cu cheia cautata
-
-	for i := uint16(1); i < nkeys; i++ {
-		cmp := bytes.Compare(node.getKey(i), key)
+	for fskey <= nkeys {
+		mid := fskey + (nkeys-fskey)/2
+		cmp := bytes.Compare(node.getKey(mid), key)
 
 		if cmp <= 0 {
-			found = i
+			found = mid
+			fskey = mid + 1
+		} else {
+			nkeys = mid - 1
 		}
 
-		if cmp >= 0 {
+		if cmp == 0 {
 			break
 		}
+
 	}
 
 	return found
@@ -247,3 +249,31 @@ func nodeSplit3(old BNode) (uint16, [3]BNode) {
 	assert(leftleft.nbytes() <= BTREE_PAGE_SIZE)
 	return 3, [3]BNode{leftleft, middle, right} // 3 noduri
 }
+
+// // insereaza un KV intr-un nod, nodul rezultat
+// // poate fi divizat
+// // cel ce apeleaza functia este responsabil pentru
+// // dealocarea nodului si divizarea si alocarii
+// // rezultatelor
+
+// func treeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
+// 	// rezultatul este un nod
+// 	// are voie sa fie mai mare decat o pagina
+// 	// (oricum va fi divizat)
+
+// 	new := BNode{data: make([]byte, 2*BTREE_PAGE_SIZE)}
+
+// 	// unde sa insereze cheia?
+
+// 	idx := nodeLookupLE(node, key)
+
+// 	// actioneaza in functie de tipul nodului
+
+// 	switch node.btype() {
+// 	case BNODE_LEAF:
+// 		// frunza, node.getKey(idx) <= key
+// 		if bytes.Equal(key, node.getKey(idx)) {
+
+// 		}
+// 	}
+// }
