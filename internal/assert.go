@@ -1,4 +1,4 @@
-package pkg
+package internal
 
 func assert(cond bool) {
 	if !cond {

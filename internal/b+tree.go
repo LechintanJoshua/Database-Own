@@ -1,4 +1,4 @@
-package pkg
+package internal
 
 import (
 	"bytes"
@@ -48,7 +48,7 @@ func (node BNode) nkeys() uint16 {
 
 // setHeader seteaza primi 4 octeti ai blocului de memorie
 // primi 2 sunt tipul nodului
-// urmatorii 2 sunt numarul de
+// urmatorii 2 sunt numarul de chei
 func (node BNode) setHeader(btype, nkeys uint16) {
 	binary.LittleEndian.PutUint16(node[0:2], btype)
 	binary.LittleEndian.PutUint16(node[2:4], nkeys)
@@ -122,7 +122,6 @@ func (node BNode) nbytes() uint16 {
 	return node.kvPos(node.nkeys())
 }
 
-// return the first kid node whose range intersects the key (kid[i] <= key)
 // nodeLookupLE parcurge indexii noduri si verifica valoarea
 // cu cheia data ca parametru pana cand aceasta este <=
 func nodeLookupLE(node BNode, key []byte) uint16 {
@@ -250,30 +249,67 @@ func nodeSplit3(old BNode) (uint16, [3]BNode) {
 	return 3, [3]BNode{leftleft, middle, right} // 3 noduri
 }
 
-// // insereaza un KV intr-un nod, nodul rezultat
-// // poate fi divizat
-// // cel ce apeleaza functia este responsabil pentru
-// // dealocarea nodului si divizarea si alocarii
-// // rezultatelor
+// treeInsert insereaza un KV intr-un nod, nodul rezultat
+// poate fi divizat
+// cel ce apeleaza functa este responsabil pentru dealocarea nodului
+// si divizarea si alocarii rezultatelor
+func treeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
+	// rezultatul este un nod
+	// are voie sa fie mai mare decat o pagina
+	// (oricum va fi divizat)
 
-// func treeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
-// 	// rezultatul este un nod
-// 	// are voie sa fie mai mare decat o pagina
-// 	// (oricum va fi divizat)
+	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
 
-// 	new := BNode{data: make([]byte, 2*BTREE_PAGE_SIZE)}
+	// unde sa insereze cheia?
+	idx := nodeLookupLE(node, key)
 
-// 	// unde sa insereze cheia?
+	// actioneaza in functie de tipul nodului
+	switch node.btype() {
+	case BNODE_LEAF:
+		// frunza, node.getKey(idx) <= key
+		if bytes.Equal(key, node.getKey(idx)) {
+			// am gasit cheia, o updatam
+			leafUpdate(new, node, idx, key, val)
+		} else {
+			// insereaz-o dupa pozitie
+			leafInsert(new, node, idx+1, key, val)
+		}
+	case BNODE_NODE:
+		// nod intern, insereaz-o in copil
+		nodeInsert(tree, new, node, idx, key, val)
+	default:
+		panic("bad node!")
+	}
 
-// 	idx := nodeLookupLE(node, key)
+	return new
+}
 
-// 	// actioneaza in functie de tipul nodului
+// leafUpdate actualizeaza perechea Key-Value dintr-un nod
+// copiaza datele din vechiul nod in cel nou si updateaza
+// kv de la indexul respectiv (copy-on-write)
+func leafUpdate(
+	new BNode, old BNode, idx uint16, key []byte, val []byte,
+) {
+	new.setHeader(BNODE_LEAF, old.nkeys())
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendKV(new, idx, 0, key, val)
+	nodeAppendRange(new, old, idx+1, idx+1, old.nkeys()-idx-1)
+}
 
-// 	switch node.btype() {
-// 	case BNODE_LEAF:
-// 		// frunza, node.getKey(idx) <= key
-// 		if bytes.Equal(key, node.getKey(idx)) {
-
-// 		}
-// 	}
-// }
+// nodeInsert insereaza recursiv un KV intr-un nod intern
+// actualizeaza pointerul catre copilul modificat si
+// gestioneaza split-ul daca copilul depaseste dimensiunea
+// unei pagini de memorie
+func nodeInsert(
+	tree *BTree, new BNode, node BNode, idx uint16,
+	key []byte, val []byte,
+) {
+	kptr := node.getPtr(idx)
+	// insertie recursiva in nodul copil
+	knode := treeInsert(tree, tree.get(kptr), key, val)
+	// divizeaza rezultatul
+	nsplit, split := nodeSplit3(knode)
+	tree.del(kptr)
+	// updateaza linkurile copilului
+	nodeReplaceKidN(tree, new, node, idx, split[:nsplit]...)
+}
