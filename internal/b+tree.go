@@ -314,11 +314,8 @@ func nodeInsert(
 // daca arborele este gol, creaza radacina
 func (tree *BTree) Insert(key []byte, val []byte) {
 	if tree.root == 0 {
-		// creez primul nod
 		root := BNode(make([]byte, BTREE_PAGE_SIZE))
-		root.setHeader(BNODE_LEAF, 2)
-		// o cheie santinele, ca sa putem acoperii spatiul
-		// asa ca atunci cand avem o cautare, sa si gasim un nod
+		// cheie santinela sa acopere edge case-ul de la nodeLookupLE
 		nodeAppendKV(root, 0, 0, nil, nil)
 		nodeAppendKV(root, 1, 0, key, val)
 
@@ -331,7 +328,6 @@ func (tree *BTree) Insert(key []byte, val []byte) {
 	tree.del(tree.root)
 
 	if nsplit > 1 {
-		//radacina a fost divizata mai adauga un nivel
 		root := BNode(make([]byte, BTREE_PAGE_SIZE))
 		root.setHeader(BNODE_NODE, nsplit)
 
@@ -372,10 +368,127 @@ func shouldMerge(
 		sibling := BNode(tree.get(node.getPtr(idx + 1)))
 		merged := sibling.nbytes() + updated.nbytes() - HEADER
 
-		if merged < BTREE_PAGE_SIZE {
+		if merged <= BTREE_PAGE_SIZE {
 			return 1, sibling
 		}
 	}
 
 	return 0, BNode{}
+}
+
+// Sterge o cheie de la un anumit index dintr-un nod frunza
+// updateaza nodul folosind (copy-on-write)
+func leafDelete(new BNode, old BNode, idx uint16) {
+	new.setHeader(BNODE_LEAF, old.nkeys()-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendRange(new, old, idx, idx+1, old.nkeys()-idx-1)
+}
+
+// nodeMerge uneste doua noduri intr-un nou (copy-on-write)
+// cheilei din left < cheile din right
+func nodeMerge(new BNode, left BNode, right BNode) {
+	assert(left.nbytes()+right.nbytes()-HEADER <= BTREE_PAGE_SIZE)
+	new.setHeader(left.btype(), left.nkeys()+right.nkeys())
+
+	nodeAppendRange(new, left, 0, 0, left.nkeys())
+	nodeAppendRange(new, right, left.nkeys(), 0, right.nkeys())
+}
+
+// nodeReplace2Kid inlocuieste 2 linkuri adiacente
+// dintr-un nod intern cu un singur link catre nodul
+// rezultat din merge (copy-on-write)
+func nodeReplace2Kid(
+	new BNode, old BNode, idx uint16, ptr uint64, key []byte,
+) {
+	new.setHeader(BNODE_NODE, old.nkeys()-1)
+	nodeAppendRange(new, old, 0, 0, idx)
+	nodeAppendKV(new, idx, ptr, key, nil)
+	nodeAppendRange(new, old, idx+1, idx+2, old.nkeys()-idx-2)
+}
+
+// treeDelete cauta o cheie si o sterge din nodul corespunzator
+// returneaza noul nod modificat (copy-on-write) sau un nod gol
+// daca cheia nu a fost gasita
+// cel ce apeleaza functia este responsabil pentru rebalansare
+// si actualizarea pointerilor
+func treeDelete(tree *BTree, node BNode, key []byte) BNode {
+	idx := nodeLookupLE(node, key)
+
+	switch node.btype() {
+	case BNODE_LEAF:
+		if bytes.Equal(key, node.getKey(idx)) {
+			new := BNode(make([]byte, BTREE_PAGE_SIZE))
+			leafDelete(new, node, idx)
+			return new
+		}
+
+		return BNode{}
+	case BNODE_NODE:
+		return nodeDelete(tree, node, idx, key)
+	default:
+		panic("bad node!")
+	}
+}
+
+// nodeDelete sterge recursiv o cheie dintr-un nod intern
+// actualizeaza pointerul catre copilul modificat si
+// gestioneaza merge-ul daca dimensiunea copilului scade
+// sub cea acceptata (copy-on-write)
+func nodeDelete(
+	tree *BTree, node BNode, idx uint16, key []byte,
+) BNode {
+	kptr := node.getPtr(idx)
+	updated := treeDelete(tree, tree.get(kptr), key)
+
+	if len(updated) == 0 {
+		return BNode{}
+	}
+
+	new := BNode(make([]byte, BTREE_PAGE_SIZE))
+	mergeDir, sibling := shouldMerge(tree, node, idx, updated)
+
+	switch {
+	case mergeDir < 0:
+		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
+		nodeMerge(merged, sibling, updated)
+		tree.del(node.getPtr(idx - 1))
+		nodeReplace2Kid(new, node, idx-1, tree.new(merged), merged.getKey(0))
+	case mergeDir > 0:
+		merged := BNode(make([]byte, BTREE_PAGE_SIZE))
+		nodeMerge(merged, updated, sibling)
+		tree.del(node.getPtr(idx + 1))
+		nodeReplace2Kid(new, node, idx, tree.new(merged), merged.getKey(0))
+	case mergeDir == 0 && updated.nkeys() == 0:
+		assert(node.nkeys() == 1 && idx == 0)
+		new.setHeader(BNODE_NODE, 0)
+	case mergeDir == 0 && updated.nkeys() > 0:
+		nodeReplaceKidN(tree, new, node, idx, updated)
+	}
+
+	return new
+}
+
+// Delete sterge o cheie din arbore
+// daca cheia exista va fi stearsa si returneaza true,
+// altfe false
+func (tree *BTree) Delete(key []byte) bool {
+	if tree.root == 0 {
+		return false
+	}
+
+	updated := treeDelete(tree, tree.get(tree.root), key)
+
+	if len(updated) == 0 {
+		return false
+	}
+
+	tree.del(tree.root)
+
+	if updated.btype() == BNODE_NODE && updated.nkeys() == 0 {
+		tree.root = updated.getPtr(0)
+	} else {
+		tree.root = tree.new(updated)
+	}
+
+	return true
 }
