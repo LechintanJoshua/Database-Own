@@ -164,16 +164,13 @@ func leafInsert(
 // nodeAppendKV adauga in nod la un anumit index o noua pereche
 // KV impreuna cu pointerul
 func nodeAppendKV(new BNode, idx uint16, ptr uint64, key []byte, val []byte) {
-	// pointeri
 	new.setPtr(idx, ptr)
-	//KV
 	pos := new.kvPos(idx)
 	binary.LittleEndian.PutUint16(new[pos+0:], uint16(len(key)))
 	binary.LittleEndian.PutUint16(new[pos+2:], uint16(len(val)))
 	copy(new[pos+4:], key)
 	copy(new[pos+4+uint16(len(key)):], val)
 
-	//offsetul cheii urmatoare
 	new.setOffset(idx+1, new.getOffset(idx)+4+uint16(len(key)+len(val)))
 }
 
@@ -251,26 +248,17 @@ func nodeSplit3(old BNode) (uint16, [3]BNode) {
 // cel ce apeleaza functa este responsabil pentru dealocarea nodului
 // si divizarea si alocarii rezultatelor
 func treeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
-	// rezultatul este un nod
-	// are voie sa fie mai mare decat o pagina
-	// (oricum va fi divizat)
 	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
-
-	// unde sa insereze cheia?
 	idx := nodeLookupLE(node, key)
 
 	switch node.btype() {
 	case BNODE_LEAF:
-		// frunza, node.getKey(idx) <= key
 		if bytes.Equal(key, node.getKey(idx)) {
-			// am gasit cheia, o updatam
 			leafUpdate(new, node, idx, key, val)
 		} else {
-			// insereaz-o dupa pozitie
 			leafInsert(new, node, idx+1, key, val)
 		}
 	case BNODE_NODE:
-		// nod intern, insereaz-o in copil
 		nodeInsert(tree, new, node, idx, key, val)
 	default:
 		panic("bad node!")
@@ -300,12 +288,9 @@ func nodeInsert(
 	key []byte, val []byte,
 ) {
 	kptr := node.getPtr(idx)
-	// insertie recursiva in nodul copil
 	knode := treeInsert(tree, tree.get(kptr), key, val)
-	// divizeaza rezultatul
 	nsplit, split := nodeSplit3(knode)
 	tree.del(kptr)
-	// updateaza linkurile copilului
 	nodeReplaceKidN(tree, new, node, idx, split[:nsplit]...)
 }
 
@@ -315,7 +300,6 @@ func nodeInsert(
 func (tree *BTree) Insert(key []byte, val []byte) {
 	if tree.root == 0 {
 		root := BNode(make([]byte, BTREE_PAGE_SIZE))
-		// cheie santinela sa acopere edge case-ul de la nodeLookupLE
 		nodeAppendKV(root, 0, 0, nil, nil)
 		nodeAppendKV(root, 1, 0, key, val)
 
