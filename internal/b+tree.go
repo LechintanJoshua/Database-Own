@@ -15,7 +15,7 @@ const BTREE_MAX_VAL_SIZE = 3000
 // maximul unui bloc de memorie
 func init() {
 	node1max := HEADER + 8 + 2 + 4 + BTREE_MAX_KEY_SIZE + BTREE_MAX_VAL_SIZE
-	assert(node1max <= BTREE_PAGE_SIZE) // maximul pentru key-value
+	assert(node1max <= BTREE_PAGE_SIZE)
 }
 
 type BNode []byte
@@ -30,8 +30,8 @@ type BTree struct {
 }
 
 const (
-	BNODE_NODE = 1 //Noduri interne fara valori
-	BNODE_LEAF = 2 //Noduri frunza cu valori
+	BNODE_NODE = 1
+	BNODE_LEAF = 2
 )
 
 // btype citeste din blocul de memorie pentru a afla daca
@@ -205,7 +205,6 @@ func nodeReplaceKidN(
 
 	for i, node := range kids {
 		nodeAppendKV(new, idx+uint16(i), tree.new(node), node.getKey(0), nil)
-		// 					^pozitie		^pointer		^cheie			^val
 	}
 
 	nodeAppendRange(new, old, idx+inc, idx+1, old.nkeys()-(idx+1))
@@ -214,8 +213,6 @@ func nodeReplaceKidN(
 // nodeSplit2 divizeaza un nod mare in 2 noduri
 // care vor respecta dimensiunea paginii de memorie
 func nodeSplit2(left BNode, right BNode, old BNode) {
-	// gaseste indexul din mijloc al nodului old si
-	// divizeazal in doua
 	mid := old.nkeys() / 2
 	left.setHeader(old.btype(), mid)
 	right.setHeader(old.btype(), old.nkeys()-mid)
@@ -230,23 +227,23 @@ func nodeSplit2(left BNode, right BNode, old BNode) {
 func nodeSplit3(old BNode) (uint16, [3]BNode) {
 	if old.nbytes() <= BTREE_PAGE_SIZE {
 		old = old[:BTREE_PAGE_SIZE]
-		return 1, [3]BNode{old} // ne-divizat
+		return 1, [3]BNode{old}
 	}
 
-	left := BNode(make([]byte, 2*BTREE_PAGE_SIZE)) //poate fi divizat mai tarziu
+	left := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
 	right := BNode(make([]byte, BTREE_PAGE_SIZE))
 	nodeSplit2(left, right, old)
 
 	if left.nbytes() <= BTREE_PAGE_SIZE {
 		left = left[:BTREE_PAGE_SIZE]
-		return 2, [3]BNode{left, right} // 2 noduri
+		return 2, [3]BNode{left, right}
 	}
 
 	leftleft := BNode(make([]byte, BTREE_PAGE_SIZE))
 	middle := BNode(make([]byte, BTREE_PAGE_SIZE))
 	nodeSplit2(leftleft, middle, left)
 	assert(leftleft.nbytes() <= BTREE_PAGE_SIZE)
-	return 3, [3]BNode{leftleft, middle, right} // 3 noduri
+	return 3, [3]BNode{leftleft, middle, right}
 }
 
 // treeInsert insereaza un KV intr-un nod, nodul rezultat
@@ -257,13 +254,11 @@ func treeInsert(tree *BTree, node BNode, key []byte, val []byte) BNode {
 	// rezultatul este un nod
 	// are voie sa fie mai mare decat o pagina
 	// (oricum va fi divizat)
-
 	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
 
 	// unde sa insereze cheia?
 	idx := nodeLookupLE(node, key)
 
-	// actioneaza in functie de tipul nodului
 	switch node.btype() {
 	case BNODE_LEAF:
 		// frunza, node.getKey(idx) <= key
@@ -312,4 +307,75 @@ func nodeInsert(
 	tree.del(kptr)
 	// updateaza linkurile copilului
 	nodeReplaceKidN(tree, new, node, idx, split[:nsplit]...)
+}
+
+// Insert inesreaza o cheie noua sau actualizeaza
+// o cheie existenta
+// daca arborele este gol, creaza radacina
+func (tree *BTree) Insert(key []byte, val []byte) {
+	if tree.root == 0 {
+		// creez primul nod
+		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+		root.setHeader(BNODE_LEAF, 2)
+		// o cheie santinele, ca sa putem acoperii spatiul
+		// asa ca atunci cand avem o cautare, sa si gasim un nod
+		nodeAppendKV(root, 0, 0, nil, nil)
+		nodeAppendKV(root, 1, 0, key, val)
+
+		tree.root = tree.new(root)
+		return
+	}
+
+	node := treeInsert(tree, tree.get(tree.root), key, val)
+	nsplit, split := nodeSplit3(node)
+	tree.del(tree.root)
+
+	if nsplit > 1 {
+		//radacina a fost divizata mai adauga un nivel
+		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+		root.setHeader(BNODE_NODE, nsplit)
+
+		for i, knode := range split[:nsplit] {
+			ptr, key := tree.new(knode), knode.getKey(0)
+			nodeAppendKV(root, uint16(i), ptr, key, nil)
+		}
+
+		tree.root = tree.new(root)
+	} else {
+		tree.root = tree.new(split[0])
+	}
+}
+
+// shouldMerge verifica daca un nod trebuie unit cu
+// fratii lui
+// ea returneaza fratele si indexul acestuia relativ la nod
+// cu care trebuie reunit
+// am impus o limita de minima de 1/4 din dimensiunea blocului
+// pentru ca un nod sa nu fie merge-uit
+func shouldMerge(
+	tree *BTree, node BNode, idx uint16, updated BNode,
+) (int, BNode) {
+	if updated.nbytes() > BTREE_PAGE_SIZE/4 {
+		return 0, BNode{}
+	}
+
+	if idx > 0 {
+		sibling := BNode(tree.get(node.getPtr(idx - 1)))
+		merged := sibling.nbytes() + updated.nbytes() - HEADER
+
+		if merged <= BTREE_PAGE_SIZE {
+			return -1, sibling
+		}
+	}
+
+	if idx+1 < node.nkeys() {
+		sibling := BNode(tree.get(node.getPtr(idx + 1)))
+		merged := sibling.nbytes() + updated.nbytes() - HEADER
+
+		if merged < BTREE_PAGE_SIZE {
+			return 1, sibling
+		}
+	}
+
+	return 0, BNode{}
 }
