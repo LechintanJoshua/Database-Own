@@ -1,6 +1,8 @@
 package internal
 
-import "unsafe"
+import (
+	"unsafe"
+)
 
 type C struct {
 	tree  BTree

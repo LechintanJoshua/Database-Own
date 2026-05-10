@@ -476,3 +476,28 @@ func (tree *BTree) Delete(key []byte) bool {
 
 	return true
 }
+
+// Get returneaza valoarea stocata la o cheie in arbore
+// daca nu exista returneaza un array gol si false
+func (tree *BTree) Get(key []byte) ([]byte, bool) {
+	if tree.root == 0 {
+		return []byte{}, false
+	}
+
+	curr := BNode(tree.get(tree.root))
+
+	for curr.btype() != BNODE_LEAF {
+		idx := nodeLookupLE(curr, key)
+		ptr := curr.getPtr(idx)
+		curr = BNode(tree.get(ptr))
+	}
+
+	idx := nodeLookupLE(curr, key)
+	node_key := curr.getKey(idx)
+
+	if bytes.Equal(key, node_key) {
+		return curr.getVal(idx), true
+	}
+
+	return []byte{}, false
+}
