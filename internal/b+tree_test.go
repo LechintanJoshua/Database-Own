@@ -1,13 +1,17 @@
 package internal
 
 import (
+	"bytes"
+	"fmt"
+	"math/rand"
+	"testing"
 	"unsafe"
 )
 
 type C struct {
 	tree  BTree
-	ref   map[string]string // referinta la date
-	pages map[uint64]BNode  //pagini in memorie
+	ref   map[string]string
+	pages map[uint64]BNode
 }
 
 func newC() *C {
@@ -40,4 +44,27 @@ func newC() *C {
 func (c *C) add(key string, val string) {
 	c.tree.Insert([]byte(key), []byte(val))
 	c.ref[key] = val
+}
+
+func TestBTreeBasic(t *testing.T) {
+	test_struct := newC()
+
+	for range 10000 {
+		k := fmt.Sprintf("key_%05d", rand.Intn(100000))
+		v := fmt.Sprintf("value_%05d", rand.Intn(100000))
+		test_struct.add(k, v)
+	}
+
+	for key, value := range test_struct.ref {
+		node_value, ok := test_struct.tree.Get([]byte(key))
+
+		if !ok {
+			t.Fatalf("Cheia %s nu exista in arbore. Asteptat: %s", key, value)
+		}
+
+		if !bytes.Equal(node_value, []byte(value)) {
+			t.Fatalf("Valoare gresita la cheia %s. Asteptat: %s, Primit: %s",
+				key, value, string(node_value))
+		}
+	}
 }

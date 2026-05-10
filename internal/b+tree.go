@@ -300,6 +300,7 @@ func nodeInsert(
 func (tree *BTree) Insert(key []byte, val []byte) {
 	if tree.root == 0 {
 		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+		root.setHeader(BNODE_LEAF, 2)
 		nodeAppendKV(root, 0, 0, nil, nil)
 		nodeAppendKV(root, 1, 0, key, val)
 
