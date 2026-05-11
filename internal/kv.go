@@ -5,6 +5,8 @@ import (
 	"os"
 	"path"
 	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 type KV struct {
@@ -18,6 +20,11 @@ type KV struct {
 	mmap struct {
 		total  int      // mmap size, poate sa fie mai mare decat file size
 		chunks [][]byte // mmaps multiple, pot sa nu fie continue
+	}
+
+	page struct {
+		flushed uint64   // marimea bazei de date in nr de pagini
+		temp    [][]byte // paginile noi alocate
 	}
 }
 
@@ -137,7 +144,7 @@ func (db *KV) pageRead(ptr uint64) []byte {
 }
 
 // extendMmap dubleaza spatiul de memorie din fisier
-// si adauga o noua pagina in chunk 
+// si adauga o noua pagina in chunk
 func extendMmap(db *KV, size int) error {
 	if size <= db.mmap.total {
 		return nil
@@ -145,7 +152,7 @@ func extendMmap(db *KV, size int) error {
 
 	// 64 << 20 (64 megabytes)
 	alloc := max(db.mmap.total, 64<<20) // dubleaza spatiul curent de la adresa
-x`x`
+
 	for db.mmap.total+alloc < size {
 		alloc *= 2
 	}
@@ -161,6 +168,40 @@ x`x`
 
 	db.mmap.total += alloc
 	db.mmap.chunks = append(db.mmap.chunks, chunk)
+
+	return nil
+}
+
+// adauga un nod la o noua pagina in memore (RAM)
+// functia face adaugarea append only
+// returnam ptr pentru inceputul nodului in pagina
+func (db *KV) pageAppend(node []byte) uint64 {
+	ptr := db.page.flushed + uint64(len(db.page.temp))
+	db.page.temp = append(db.page.temp, node)
+
+	return ptr
+}
+
+// writePages scrie paginile cu noduri stocate temporar
+// in fisierul de pe disc si verifica de erori
+// actualizeaza numarul paginilor totale si reseteaza temp
+func writePages(db *KV) error {
+	// extinde mmap daca trebuie
+	size := (int(db.page.flushed) + len(db.page.temp)) * BTREE_PAGE_SIZE
+
+	if err := extendMmap(db, size); err != nil {
+		return err
+	}
+
+	offset := int64(db.page.flushed * BTREE_PAGE_SIZE)
+
+	if _, err := unix.Pwritev(db.fd, db.page.temp, offset); err != nil {
+		return err
+	}
+
+	// arunca data din memoria principala
+	db.page.flushed += uint64(len(db.page.temp))
+	db.page.temp = db.page.temp[:0]
 
 	return nil
 }
