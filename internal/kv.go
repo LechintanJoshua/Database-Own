@@ -12,12 +12,22 @@ type KV struct {
 	// intern
 	fd   int
 	tree BTree
+
 	// mai mult
+
+	mmap struct {
+		total  int      // mmap size, poate sa fie mai mare decat file size
+		chunks [][]byte // mmaps multiple, pot sa nu fie continue
+	}
 }
 
 // Open deschide fisierul din adresa Path
 // si verifica daca aceasta a avut succes
 func (db *KV) Open() error {
+	db.tree.get = db.pageRead   // read a page
+	db.tree.new = db.pageAppend // append a page
+	db.tree.del = func(uint64) {}
+
 	fd, err := createFileSync(db.Path)
 
 	if err != nil {
@@ -104,4 +114,53 @@ func createFileSync(file string) (int, error) {
 	}
 
 	return fd, nil
+}
+
+// pageRead citeste o pagina din memoria unui fisier
+// si returneaza nodul asociat acelei pagini
+func (db *KV) pageRead(ptr uint64) []byte {
+	start := uint64(0)
+
+	for _, chunk := range db.mmap.chunks {
+		end := start + uint64(len(chunk))/BTREE_PAGE_SIZE
+
+		if ptr < end {
+			offset := BTREE_PAGE_SIZE * (ptr - start)
+
+			return chunk[offset : offset+BTREE_PAGE_SIZE]
+		}
+
+		start = end
+	}
+
+	panic("bad ptr")
+}
+
+// extendMmap dubleaza spatiul de memorie din fisier
+// si adauga o noua pagina in chunk 
+func extendMmap(db *KV, size int) error {
+	if size <= db.mmap.total {
+		return nil
+	}
+
+	// 64 << 20 (64 megabytes)
+	alloc := max(db.mmap.total, 64<<20) // dubleaza spatiul curent de la adresa
+x`x`
+	for db.mmap.total+alloc < size {
+		alloc *= 2
+	}
+
+	chunk, err := syscall.Mmap(
+		db.fd, int64(db.mmap.total), alloc,
+		syscall.PROT_READ, syscall.MAP_SHARED, // doar citire
+	)
+
+	if err != nil {
+		return fmt.Errorf("mmap: %w", err)
+	}
+
+	db.mmap.total += alloc
+	db.mmap.chunks = append(db.mmap.chunks, chunk)
+
+	return nil
 }
