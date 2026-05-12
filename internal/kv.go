@@ -1,6 +1,8 @@
 package internal
 
 import (
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"os"
 	"path"
@@ -9,13 +11,12 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+const DB_SIG = "BuildYourOwnDBLJ"
+
 type KV struct {
-	Path string // numele fisierului
-	// intern
+	Path string
 	fd   int
 	tree BTree
-
-	// mai mult
 
 	mmap struct {
 		total  int      // mmap size, poate sa fie mai mare decat file size
@@ -23,16 +24,16 @@ type KV struct {
 	}
 
 	page struct {
-		flushed uint64   // marimea bazei de date in nr de pagini
-		temp    [][]byte // paginile noi alocate
+		flushed uint64
+		temp    [][]byte
 	}
 }
 
 // Open deschide fisierul din adresa Path
 // si verifica daca aceasta a avut succes
 func (db *KV) Open() error {
-	db.tree.get = db.pageRead   // read a page
-	db.tree.new = db.pageAppend // append a page
+	db.tree.get = db.pageRead
+	db.tree.new = db.pageAppend
 	db.tree.del = func(uint64) {}
 
 	fd, err := createFileSync(db.Path)
@@ -42,6 +43,24 @@ func (db *KV) Open() error {
 	}
 
 	db.fd = fd
+
+	size, err := os.Stat(db.Path)
+
+	if err != nil {
+		return err
+	}
+
+	sz := size.Size()
+
+	if sz > 0 {
+		if err := extendMmap(db, int(sz)); err != nil {
+			return err
+		}
+	}
+
+	if err = readRoot(db, size.Size()); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -71,7 +90,6 @@ func (db *KV) Del(key []byte) (bool, error) {
 // radacina si sincronizeaza din nou sa fie persistent
 // (two-phase-update)
 func updateFile(db *KV) error {
-	// 1. Scrie noduri
 	if err := writePages(db); err != nil {
 		return err
 	}
@@ -81,7 +99,6 @@ func updateFile(db *KV) error {
 		return err
 	}
 
-	// 3. Actualizeaza pointerul radacinii atomic
 	if err := updateRoot(db); err != nil {
 		return err
 	}
@@ -95,7 +112,6 @@ func updateFile(db *KV) error {
 // seteaza masca la -rw-r--r-- si sincronizeaza
 // directorul in care se afla
 func createFileSync(file string) (int, error) {
-	// obtine file descriptorul directorului
 	flags := os.O_RDONLY | syscall.O_DIRECTORY
 	dirfd, err := syscall.Open(path.Dir(file), flags, 0o644)
 
@@ -105,15 +121,12 @@ func createFileSync(file string) (int, error) {
 
 	defer syscall.Close(dirfd)
 
-	// deschide sau creaza fisierul
 	flags = os.O_RDWR | os.O_CREATE
 	fd, err := syscall.Openat(dirfd, path.Base(file), flags, 0o644)
 
 	if err != nil {
 		return -1, fmt.Errorf("open file: %w", err)
 	}
-
-	// fsync directorul
 
 	if err = syscall.Fsync(dirfd); err != nil {
 		_ = syscall.Close(fd) // s-ar putea sa lase un fisier gol
@@ -202,6 +215,65 @@ func writePages(db *KV) error {
 	// arunca data din memoria principala
 	db.page.flushed += uint64(len(db.page.temp))
 	db.page.temp = db.page.temp[:0]
+
+	return nil
+}
+
+// saveMeta salveaza meta datele bazei de date
+// ii ofera semnatura, pointerul catre radacina,
+// si numarul de pagini folosite
+func saveMeta(db *KV) []byte {
+	var data [32]byte
+	copy(data[:16], []byte(DB_SIG))
+	binary.LittleEndian.PutUint64(data[16:], db.tree.root)
+	binary.LittleEndian.PutUint64(data[24:], db.page.flushed)
+
+	return data[:]
+}
+
+// loadMeta citeste meta datele bazei din fisier
+func loadMeta(db *KV, data []byte) {
+	if string(data[:16]) != DB_SIG {
+		panic("different signature")
+	}
+
+	db.tree.root = binary.LittleEndian.Uint64(data[16:])
+	db.page.flushed = binary.LittleEndian.Uint64(data[24:])
+}
+
+// readRoot citeste radacina arborelui din datele
+// meta ale fisierului si verifica daca acestea
+// au fost corupte
+func readRoot(db *KV, fileSize int64) error {
+	if fileSize == 0 {
+		db.page.flushed = 1 // pagina meta e initializata pe prima scriere
+		return nil
+	}
+
+	data := db.mmap.chunks[0]
+	loadMeta(db, data)
+
+	if db.tree.root >= db.page.flushed {
+		err := errors.New("Corupted data, root >= pages")
+		return err
+	}
+
+	totPages := db.page.flushed * BTREE_PAGE_SIZE
+
+	if totPages > uint64(fileSize) {
+		err := errors.New("Lost pages, more pages than writter")
+		return err
+	}
+
+	return nil
+}
+
+// updateRoot scrie meta datele pe disc si verifica
+// daca scrierea a avut succes
+func updateRoot(db *KV) error {
+	if _, err := syscall.Pwrite(db.fd, saveMeta(db), 0); err != nil {
+		return fmt.Errorf("write meta page: %w", err)
+	}
 
 	return nil
 }
