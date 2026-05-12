@@ -27,6 +27,8 @@ type KV struct {
 		flushed uint64
 		temp    [][]byte
 	}
+
+	failed bool // a picat
 }
 
 // Open deschide fisierul din adresa Path
@@ -74,15 +76,17 @@ func (db *KV) Get(key []byte) ([]byte, bool) {
 // Set apeleaza emtoda interna a tree si
 // actualizeaza fisierul
 func (db *KV) Set(key []byte, val []byte) error {
+	meta := saveMeta(db)
 	db.tree.Insert(key, val)
-	return updateFile(db)
+	return updateOrRevert(db, meta)
 }
 
 // Del apeleaza metoda interna a tree, actualizeaza fisierul
 // si returneaza un tuplu (sters, erroare)
 func (db *KV) Del(key []byte) (bool, error) {
+	meta := saveMeta(db)
 	deleted := db.tree.Delete(key)
-	return deleted, updateFile(db)
+	return deleted, updateOrRevert(db, meta)
 }
 
 // updateFile actualizeaza fisierul si verifica erorile
@@ -276,4 +280,37 @@ func updateRoot(db *KV) error {
 	}
 
 	return nil
+}
+
+// updateOrRevert verifica daca actualizarea a avut
+// succes si repara in cazul in care nu
+// verifica daca metadatele de pe disc sunt
+// in stadiu necunoscut si le marcheaza asa pentru
+// rollback
+func updateOrRevert(db *KV, meta []byte) error {
+	if db.failed {
+		err := updateRoot(db)
+
+		if err != nil {
+			return fmt.Errorf("Update failed again: %w", err)
+		}
+
+		err = syscall.Fsync(db.fd)
+
+		if err != nil {
+			return fmt.Errorf("Fsync failed inside update recovery: %w", err)
+		}
+
+		db.failed = false
+	}
+
+	err := updateFile(db)
+
+	if err != nil {
+		db.failed = true
+		loadMeta(db, meta)
+		db.page.temp = db.page.temp[:0]
+	}
+
+	return err
 }
