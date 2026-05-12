@@ -89,6 +89,33 @@ func (db *KV) Del(key []byte) (bool, error) {
 	return deleted, updateOrRevert(db, meta)
 }
 
+// Close sterge paginile din memoria RAM
+// si inchide descriptorul de fisiere
+func (db *KV) Close() error {
+	var err error
+
+	for _, chunk := range db.mmap.chunks {
+		e := syscall.Munmap(chunk)
+
+		if e != nil {
+			err = e
+		}
+	}
+
+	merr := err
+	err = syscall.Close(db.fd)
+
+	if merr != nil {
+		return fmt.Errorf("delete map: %w", merr)
+	}
+
+	if err != nil {
+		return fmt.Errorf("close fd: %w", err)
+	}
+
+	return nil
+}
+
 // updateFile actualizeaza fisierul si verifica erorile
 // scrie nodurile in pagini, sincronizeaza, actualizeaza
 // radacina si sincronizeaza din nou sa fie persistent
