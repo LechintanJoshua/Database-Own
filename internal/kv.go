@@ -19,8 +19,8 @@ type KV struct {
 	tree BTree
 
 	mmap struct {
-		total  int      // mmap size, poate sa fie mai mare decat file size
-		chunks [][]byte // mmaps multiple, pot sa nu fie continue
+		total  int
+		chunks [][]byte
 	}
 
 	page struct {
@@ -28,7 +28,7 @@ type KV struct {
 		temp    [][]byte
 	}
 
-	failed bool // a picat
+	failed bool
 }
 
 // Open deschide fisierul din adresa Path
@@ -125,7 +125,6 @@ func updateFile(db *KV) error {
 		return err
 	}
 
-	// 2. fsync pentru a forca ordinea intre 1 si 3
 	if err := syscall.Fsync(db.fd); err != nil {
 		return err
 	}
@@ -133,8 +132,6 @@ func updateFile(db *KV) error {
 	if err := updateRoot(db); err != nil {
 		return err
 	}
-
-	// 4. fsync sa fie totul persistent
 
 	return syscall.Fsync(db.fd)
 }
@@ -194,8 +191,8 @@ func extendMmap(db *KV, size int) error {
 		return nil
 	}
 
-	// 64 << 20 (64 megabytes)
-	alloc := max(db.mmap.total, 64<<20) // dubleaza spatiul curent de la adresa
+	// 64 << 20 (64MB)
+	alloc := max(db.mmap.total, 64<<20)
 
 	for db.mmap.total+alloc < size {
 		alloc *= 2
@@ -203,7 +200,7 @@ func extendMmap(db *KV, size int) error {
 
 	chunk, err := syscall.Mmap(
 		db.fd, int64(db.mmap.total), alloc,
-		syscall.PROT_READ, syscall.MAP_SHARED, // doar citire
+		syscall.PROT_READ, syscall.MAP_SHARED,
 	)
 
 	if err != nil {
@@ -230,7 +227,6 @@ func (db *KV) pageAppend(node []byte) uint64 {
 // in fisierul de pe disc si verifica de erori
 // actualizeaza numarul paginilor totale si reseteaza temp
 func writePages(db *KV) error {
-	// extinde mmap daca trebuie
 	size := (int(db.page.flushed) + len(db.page.temp)) * BTREE_PAGE_SIZE
 
 	if err := extendMmap(db, size); err != nil {
@@ -243,7 +239,6 @@ func writePages(db *KV) error {
 		return err
 	}
 
-	// arunca data din memoria principala
 	db.page.flushed += uint64(len(db.page.temp))
 	db.page.temp = db.page.temp[:0]
 
@@ -277,7 +272,7 @@ func loadMeta(db *KV, data []byte) {
 // au fost corupte
 func readRoot(db *KV, fileSize int64) error {
 	if fileSize == 0 {
-		db.page.flushed = 1 // pagina meta e initializata pe prima scriere
+		db.page.flushed = 1
 		return nil
 	}
 
