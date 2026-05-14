@@ -23,10 +23,9 @@ type BNode []byte
 type BTree struct {
 	root uint64
 
-	//callback-uri pentru managementul paginilor de pe disc
-	get func(uint64) []byte //dereferentierea unui pointer
-	new func([]byte) uint64 //alocarea unei noi pagini
-	del func(uint64)        // dealocarea unei pagini
+	get func(uint64) []byte
+	new func([]byte) uint64
+	del func(uint64)
 }
 
 const (

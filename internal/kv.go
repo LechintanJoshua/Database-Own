@@ -26,7 +26,8 @@ type KV struct {
 
 	page struct {
 		flushed uint64
-		temp    [][]byte
+		nappend uint64            // numarul de pagini care trebuie adaugate
+		updates map[uint64][]byte // update-uri in asteptare, incluzand si paginile appended
 	}
 
 	failed bool
@@ -36,7 +37,7 @@ type KV struct {
 // si verifica daca aceasta a avut succes
 func (db *KV) Open() error {
 	db.tree.get = db.pageRead
-	db.tree.new = db.pageAppend
+	db.tree.new = db.pageAlloc
 	db.tree.del = func(uint64) {}
 
 	db.free.get = db.pageRead
@@ -169,9 +170,19 @@ func createFileSync(file string) (int, error) {
 	return fd, nil
 }
 
-// pageRead citeste o pagina din memoria unui fisier
-// si returneaza nodul asociat acelei pagini
+// pageRead verifica daca nodul a fost adus in memorie deja
+// daca nu il citeste de pe disc
 func (db *KV) pageRead(ptr uint64) []byte {
+	if node, ok := db.page.updates[ptr]; ok {
+		return node
+	}
+
+	return db.pageReadFile(ptr)
+}
+
+// pageReadFile citeste o pagina din memoria unui fisier
+// si returneaza nodul asociat acelei pagini
+func (db *KV) pageReadFile(ptr uint64) []byte {
 	start := uint64(0)
 
 	for _, chunk := range db.mmap.chunks {
@@ -252,12 +263,17 @@ func writePages(db *KV) error {
 
 // saveMeta salveaza meta datele bazei de date
 // ii ofera semnatura, pointerul catre radacina,
-// si numarul de pagini folosite
+// si numarul de pagini folosite precum si
+// datele din FreeList
 func saveMeta(db *KV) []byte {
-	var data [32]byte
+	var data [64]byte
 	copy(data[:16], []byte(DB_SIG))
 	binary.LittleEndian.PutUint64(data[16:], db.tree.root)
 	binary.LittleEndian.PutUint64(data[24:], db.page.flushed)
+	binary.LittleEndian.PutUint64(data[32:], db.free.headPage)
+	binary.LittleEndian.PutUint64(data[40:], db.free.headSeq)
+	binary.LittleEndian.PutUint64(data[48:], db.free.tailPage)
+	binary.LittleEndian.PutUint64(data[56:], db.free.tailSeq)
 
 	return data[:]
 }
@@ -270,15 +286,23 @@ func loadMeta(db *KV, data []byte) {
 
 	db.tree.root = binary.LittleEndian.Uint64(data[16:])
 	db.page.flushed = binary.LittleEndian.Uint64(data[24:])
+	db.free.headPage = binary.LittleEndian.Uint64(data[32:])
+	db.free.headSeq = binary.LittleEndian.Uint64(data[40:])
+	db.free.tailPage = binary.LittleEndian.Uint64(data[48:])
+	db.free.tailSeq = binary.LittleEndian.Uint64(data[56:])
 }
 
 // readRoot citeste radacina arborelui din datele
 // meta ale fisierului si verifica daca acestea
 // au fost corupte
 func readRoot(db *KV, fileSize int64) error {
-	if fileSize == 0 {
-		db.page.flushed = 1
-		return nil
+	if fileSize == 0 { // fisier gol
+		// reserva 2 pagini: pagina meta si frelist-ul
+		db.page.flushed = 2
+		// adauga un nod initial in freeList sa nu fie goala
+		db.free.headPage = 1
+		db.free.tailPage = 1
+		return nil // pagina meta va fi scrisa in primul update
 	}
 
 	data := db.mmap.chunks[0]
@@ -340,4 +364,30 @@ func updateOrRevert(db *KV, meta []byte) error {
 	}
 
 	return err
+}
+
+// pageAlloc aloca o pagina de memorie pe disc
+// incearca sa recicleze o pagina din Free List
+// daca nu reuseste da append
+func (db *KV) pageAlloc(node []byte) uint64 {
+	if ptr := db.free.PopHead(); ptr != 0 { // incearca in FreeList
+		db.page.updates[ptr] = node
+		return ptr
+	}
+
+	return db.pageAppend(node) // append
+}
+
+// pageWrite aduce pagina unui nod din memorie
+// verifica daca este pagina noua creata ce nu a fost scrisa
+// sau o aduce din fisier
+func (db *KV) pageWrite(ptr uint64) []byte {
+	if node, ok := db.page.updates[ptr]; ok {
+		return node
+	}
+
+	node := make([]byte, BTREE_PAGE_SIZE)
+	copy(node, db.pageReadFile(ptr))
+	db.page.updates[ptr] = node
+	return node
 }

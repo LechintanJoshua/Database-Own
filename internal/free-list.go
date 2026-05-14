@@ -5,17 +5,14 @@ import "encoding/binary"
 type LNode []byte
 
 type FreeList struct {
-	// callback-uri pentru gestionarea spatilui pe disc
-	get func(uint64) []byte // citeste o pagina
-	new func([]byte) uint64 // adauga o pagina (append)
-	set func(uint64) []byte // actualizeaza o pagina existenta
-	// date persistente in meta pagina
-	headPage uint64 // pointer la head node-ul listei
-	headSeq  uint64 // numar de secventa monotonica pentru indexul in head
+	get      func(uint64) []byte
+	new      func([]byte) uint64
+	set      func(uint64) []byte
+	headPage uint64
+	headSeq  uint64
 	tailPage uint64
 	tailSeq  uint64
-	// state-ul in memory
-	maxSeq uint64 // tailSeq salvata pentru prevenirea consumari itemelor noi adaugate
+	maxSeq   uint64
 }
 
 const FREE_LIST_HEADER = 8
@@ -61,25 +58,19 @@ func (fl *FreeList) PopHead() uint64 {
 // si verifica daca mai avea un element in
 // alfel creaza un nod nou
 func (fl *FreeList) PushTail(ptr uint64) {
-	// adauga nodul la final
 	LNode(fl.set(fl.tailPage)).setPtr(seq2idx(fl.tailSeq), ptr)
 	fl.tailSeq++
-	// adaiga un nou nod la final daca lista e plina
-	// (nu e niciodata goala)
+
 	if seq2idx(fl.tailSeq) == 0 {
-		// incearca sa il refolosesti din capul listei
-		next, head := flPop(fl) // s-ar putea sa scoata head-ul
+		next, head := flPop(fl)
 
 		if next == 0 {
-			// sau aloca un nod nou prin adaugare
 			next = fl.new(make([]byte, BTREE_PAGE_SIZE))
 		}
 
-		// leaga-l de tail
 		LNode(fl.set(fl.tailPage)).setNext(next)
 		fl.tailPage = next
 
-		// adauga si nodul head daca a fost sters
 		if head != 0 {
 			LNode(fl.set(fl.tailPage)).setPtr(0, head)
 			fl.tailSeq++
@@ -103,18 +94,16 @@ func (fl *FreeList) SetMaxSeq() {
 // sterge nodul daca este gol
 func flPop(fl *FreeList) (ptr uint64, head uint64) {
 	if fl.headSeq == fl.maxSeq {
-		return 0, 0 // nu se poate avansa
+		return 0, 0
 	}
 
 	node := LNode(fl.get(fl.headPage))
-	ptr = node.getPtr(seq2idx(fl.headSeq)) // id-ul/item-ul
+	ptr = node.getPtr(seq2idx(fl.headSeq))
 	fl.headSeq++
 
 	// mutam head-ul la urmatorul nod daca a devenint gol
 	if seq2idx(fl.headSeq) == 0 {
 		head, fl.headPage = fl.headPage, node.getNext()
-		// lasam lista sa aibe macar un node sa evitam
-		// cazurile speciale
 		assert(fl.headPage != 0)
 	}
 
