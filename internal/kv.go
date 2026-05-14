@@ -17,6 +17,7 @@ type KV struct {
 	Path string
 	fd   int
 	tree BTree
+	free FreeList
 
 	mmap struct {
 		total  int
@@ -37,6 +38,10 @@ func (db *KV) Open() error {
 	db.tree.get = db.pageRead
 	db.tree.new = db.pageAppend
 	db.tree.del = func(uint64) {}
+
+	db.free.get = db.pageRead
+	db.free.new = db.pageAppend
+	db.free.set = db.pageWrite
 
 	fd, err := createFileSync(db.Path)
 
