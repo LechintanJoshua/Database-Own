@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"slices"
 	"syscall"
 
 	"golang.org/x/sys/unix"
@@ -38,11 +39,13 @@ type KV struct {
 func (db *KV) Open() error {
 	db.tree.get = db.pageRead
 	db.tree.new = db.pageAlloc
-	db.tree.del = func(uint64) {}
+	db.tree.del = db.free.PushTail
 
 	db.free.get = db.pageRead
 	db.free.new = db.pageAppend
 	db.free.set = db.pageWrite
+
+	db.page.updates = make(map[uint64][]byte)
 
 	fd, err := createFileSync(db.Path)
 
@@ -139,7 +142,13 @@ func updateFile(db *KV) error {
 		return err
 	}
 
-	return syscall.Fsync(db.fd)
+	if err := syscall.Fsync(db.fd); err != nil {
+		return err
+	}
+
+	db.free.SetMaxSeq()
+
+	return nil
 }
 
 // createFileSync creaza un fisier nou,
@@ -233,8 +242,9 @@ func extendMmap(db *KV, size int) error {
 // functia face adaugarea append only
 // returnam ptr pentru inceputul nodului in pagina
 func (db *KV) pageAppend(node []byte) uint64 {
-	ptr := db.page.flushed + uint64(len(db.page.temp))
-	db.page.temp = append(db.page.temp, node)
+	ptr := db.page.flushed + db.page.nappend
+	db.page.updates[ptr] = node
+	db.page.nappend++
 
 	return ptr
 }
@@ -243,20 +253,26 @@ func (db *KV) pageAppend(node []byte) uint64 {
 // in fisierul de pe disc si verifica de erori
 // actualizeaza numarul paginilor totale si reseteaza temp
 func writePages(db *KV) error {
-	size := (int(db.page.flushed) + len(db.page.temp)) * BTREE_PAGE_SIZE
+	size := (int(db.page.flushed) + int(db.page.nappend)) * BTREE_PAGE_SIZE
 
 	if err := extendMmap(db, size); err != nil {
 		return err
 	}
 
-	offset := int64(db.page.flushed * BTREE_PAGE_SIZE)
+	ptr := db.sortIdsAsc()
 
-	if _, err := unix.Pwritev(db.fd, db.page.temp, offset); err != nil {
-		return err
+	for _, id := range ptr {
+		node := db.page.updates[id]
+		offset := int64(id * BTREE_PAGE_SIZE)
+
+		if _, err := unix.Pwrite(db.fd, node, offset); err != nil {
+			return err
+		}
 	}
 
-	db.page.flushed += uint64(len(db.page.temp))
-	db.page.temp = db.page.temp[:0]
+	db.page.flushed += db.page.nappend
+	db.page.nappend = 0
+	clear(db.page.updates)
 
 	return nil
 }
@@ -360,7 +376,8 @@ func updateOrRevert(db *KV, meta []byte) error {
 	if err != nil {
 		db.failed = true
 		loadMeta(db, meta)
-		db.page.temp = db.page.temp[:0]
+		clear(db.page.updates)
+		db.page.nappend = 0
 	}
 
 	return err
@@ -370,12 +387,12 @@ func updateOrRevert(db *KV, meta []byte) error {
 // incearca sa recicleze o pagina din Free List
 // daca nu reuseste da append
 func (db *KV) pageAlloc(node []byte) uint64 {
-	if ptr := db.free.PopHead(); ptr != 0 { // incearca in FreeList
+	if ptr := db.free.PopHead(); ptr != 0 {
 		db.page.updates[ptr] = node
 		return ptr
 	}
 
-	return db.pageAppend(node) // append
+	return db.pageAppend(node)
 }
 
 // pageWrite aduce pagina unui nod din memorie
@@ -390,4 +407,18 @@ func (db *KV) pageWrite(ptr uint64) []byte {
 	copy(node, db.pageReadFile(ptr))
 	db.page.updates[ptr] = node
 	return node
+}
+
+// sortIdsAsc sorteaza id-urile paginilor
+// care vor trebui actualizate crescator
+func (db *KV) sortIdsAsc() []uint64 {
+	ptr := make([]uint64, 0, len(db.page.updates))
+
+	for id := range db.page.updates {
+		ptr = append(ptr, id)
+	}
+
+	slices.Sort(ptr)
+
+	return ptr
 }
