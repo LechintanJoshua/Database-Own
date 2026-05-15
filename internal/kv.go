@@ -27,8 +27,8 @@ type KV struct {
 
 	page struct {
 		flushed uint64
-		nappend uint64            // numarul de pagini care trebuie adaugate
-		updates map[uint64][]byte // update-uri in asteptare, incluzand si paginile appended
+		nappend uint64
+		updates map[uint64][]byte
 	}
 
 	failed bool
@@ -240,7 +240,7 @@ func extendMmap(db *KV, size int) error {
 
 // adauga un nod la o noua pagina in memore (RAM)
 // functia face adaugarea append only
-// returnam ptr pentru inceputul nodului in pagina
+// returnam ptr pentru numarul nodului in pagina
 func (db *KV) pageAppend(node []byte) uint64 {
 	ptr := db.page.flushed + db.page.nappend
 	db.page.updates[ptr] = node
@@ -312,13 +312,11 @@ func loadMeta(db *KV, data []byte) {
 // meta ale fisierului si verifica daca acestea
 // au fost corupte
 func readRoot(db *KV, fileSize int64) error {
-	if fileSize == 0 { // fisier gol
-		// reserva 2 pagini: pagina meta si frelist-ul
+	if fileSize == 0 {
 		db.page.flushed = 2
-		// adauga un nod initial in freeList sa nu fie goala
 		db.free.headPage = 1
 		db.free.tailPage = 1
-		return nil // pagina meta va fi scrisa in primul update
+		return nil
 	}
 
 	data := db.mmap.chunks[0]
