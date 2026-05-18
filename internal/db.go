@@ -1,5 +1,10 @@
 package internal
 
+import (
+	"encoding/binary"
+	"fmt"
+)
+
 type DB struct {
 	Path string
 	kv   KV
@@ -10,3 +15,107 @@ func (db *DB) Insert(table string, rec Record) (bool, error)
 func (db *DB) Update(table string, rec Record) (bool, error)
 func (db *DB) Upsert(table string, rec Record) (bool, error)
 func (db *DB) Delete(table string, rec Record) (bool, error)
+
+// dbGet obtine un rand dintr-un tabel pe baza chei primare,
+// populeaza structura rec si returneaza un tuplu
+// pentru existensa sa si eroare
+func dbGet(db *DB, tdef *TableDef, rec *Record) (bool, error) {
+	// 1. reordoneaza coloanele din input dupa schema
+	values, err := checkRecord(tdef, *rec, tdef.PKeys)
+	if err != nil {
+		return false, err
+	}
+
+	// 2. codifica cheia primara
+	key := encodeKey(nil, tdef.Prefix, values[:tdef.PKeys])
+	// 3. interogheaza stocare KV
+	val, ok := db.kv.Get(key)
+	if !ok {
+		return false, nil
+	}
+
+	// 4. decodifica valorile in coloane
+	for i := tdef.PKeys; i < len(tdef.Cols); i++ {
+		values[i].Type = tdef.Types[i]
+	}
+
+	decodeValues(val, values[tdef.PKeys:])
+	rec.Cols = tdef.Cols
+	rec.Vals = values
+	return true, nil
+}
+
+// checkRecord rearanjeaza ordineal coloanelor date de urilizator
+// in functie de ordinea coloanelor din definita tabelului
+// si verifica ca acestea sa existe sau sa respecte tipul
+// valorilor stocate in ele
+// n == tdef.Pkeys: inseamna ca randul este exact o cheie primara
+// n == len(tdef.Cols): randul contine toate coloanele
+func checkRecord(tdef *TableDef, rec Record, n int) ([]Value, error) {
+	values := make([]Value, n)
+	var err error
+
+	for i := range n {
+		check := rec.Get(tdef.Cols[i])
+
+		if check == nil {
+			return nil, fmt.Errorf("missing column; %s", tdef.Cols[i])
+		}
+
+		if check.Type != tdef.Types[i] {
+			return nil, fmt.Errorf("bad type for column: %s", tdef.Cols[i])
+		}
+
+		values[i] = *check
+	}
+
+	return values, err
+}
+
+// codifica coloanele pentru a afla cheia lor in arbore
+func encodeKey(out []byte, prefix uint32, vals []Value) []byte {
+	prefBuf := make([]byte, 4)
+	size := make([]byte, 4)
+	buff := make([]byte, 8)
+	binary.LittleEndian.PutUint32(prefBuf[:], prefix)
+
+	out = append(out, prefBuf...)
+
+	for _, v := range vals {
+		switch v.Type {
+		case TYPE_BYTES:
+			binary.LittleEndian.PutUint32(size[:], uint32(len(v.Str)))
+			out = append(out, size...)
+			out = append(out, v.Str...)
+		case TYPE_INT64:
+			// va trebui updatata sa foloseasca alta metoda
+			// de codificare, pentru a nu pierder bitul
+			// de semn si a corupe datele
+			binary.LittleEndian.PutUint64(buff[:], uint64(v.I64))
+			out = append(out, buff...)
+		}
+	}
+
+	return out
+}
+
+// decodifica valorile primite de pe disc in tipul Value
+func decodeValues(in []byte, out []Value) {
+	// stiu ca 4 bytes sunt prea multi pentru cate date am
+	// nevoie dar nu mai vreau sa ma compli cu casting
+	// pentru doar 2 bytes
+	idx := uint32(0)
+
+	for i, v := range out {
+		switch v.Type {
+		case TYPE_BYTES:
+			size := binary.LittleEndian.Uint32(in[idx : idx+4])
+			idx += 4
+			out[i].Str = in[idx : idx+size]
+			idx += size
+		case TYPE_INT64:
+			out[i].I64 = int64(binary.LittleEndian.Uint64(in[idx : idx+8]))
+			idx += 8
+		}
+	}
+}
