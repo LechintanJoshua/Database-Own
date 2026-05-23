@@ -518,26 +518,30 @@ func (tree *BTree) Get(key []byte) ([]byte, bool) {
 	return []byte{}, false
 }
 
+// treeUpdate actualizeaza un KV intr-un nod, nodul rezultat
+// poate fi divizat
+// cel ce apeleaza functia este responsabil pentru dealocarea
+// nodului si divizarea si alocarii rezoltatelor
+// totodata, nodul va fi actualizat in functie de modul dat
+// INSERT, UPDATE, UPSERT
 func treeUpdate(tree *BTree, node BNode, req *UpdateReq) BNode {
 	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
 	idx := nodeLookupLE(node, req.Key)
 
 	switch node.btype() {
 	case BNODE_LEAF:
-		return leafUpdateMode(tree, new, node, req, idx)
+		return leafUpdateMode(new, node, req, idx)
 	case BNODE_NODE:
-		nodeUpdate(tree)
+		return nodeUpdate(tree, new, node, idx, req)
 	default:
 		panic("bad node")
 	}
-
 }
 
 // leafUpdateMode actualizeaza un nod in frunza in functie
 // de modul dat, INSERT, UPDATE, UPSERT
 func leafUpdateMode(
-	tree *BTree, new BNode, old BNode,
-	req *UpdateReq, idx uint16,
+	new BNode, old BNode, req *UpdateReq, idx uint16,
 ) BNode {
 	switch req.Mode {
 	case MODE_INSERT_ONLY:
@@ -571,12 +575,68 @@ func leafUpdateMode(
 	return new
 }
 
+// nodeUpdate actualizeaza recursiv in KV intr-un nod intern
+// actualizeaza pointerul catre copilul modificat si
+// gestioneaza split-ul daca copilul depaseste dimensiunea
+// pagini de memorie
 func nodeUpdate(
-	tree *BTree, node BNode, idx uint16, req *UpdateReq,
-) {
+	tree *BTree, new BNode, node BNode,
+	idx uint16, req *UpdateReq,
+) BNode {
+	kptr := node.getPtr(idx)
+	updated := treeUpdate(tree, tree.get(kptr), req)
 
+	if len(updated) == 0 {
+		return BNode{}
+	}
+
+	nsplit, split := nodeSplit3(updated)
+	tree.del(kptr)
+	nodeReplaceKidN(tree, new, node, idx, split[:nsplit]...)
+
+	return new
 }
 
+// Update actualizeaza o cheie in functie
+// de trei moduri, INSERT, UPSERT, UPDATE
 func (tree *BTree) Update(req *UpdateReq) {
+	// daca arborele e gol, nu poti actualiza nimic
+	if tree.root == 0 && req.Mode == MODE_UPDATE_ONLY {
+		return
+	}
 
+	// altfel daca e upsert sau insert doar insereaza
+	if tree.root == 0 {
+		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+		root.setHeader(BNODE_LEAF, 2)
+		nodeAppendKV(root, 0, 0, nil, nil)
+		nodeAppendKV(root, 1, 0, req.Key, req.Val)
+
+		tree.root = tree.new(root)
+		req.Added = true
+		return
+	}
+
+	node := treeUpdate(tree, tree.get(tree.root), req)
+
+	if len(node) == 0 {
+		return
+	}
+
+	nsplit, split := nodeSplit3(node)
+	tree.del(tree.root)
+
+	if nsplit > 1 {
+		root := BNode(make([]byte, BTREE_PAGE_SIZE))
+		root.setHeader(BNODE_NODE, nsplit)
+
+		for i, knode := range split[:nsplit] {
+			kptr, key := tree.new(knode), knode.getKey(0)
+			nodeAppendKV(root, uint16(i), kptr, key, nil)
+		}
+
+		tree.root = tree.new(root)
+	} else {
+		tree.root = tree.new(split[0])
+	}
 }

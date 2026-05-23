@@ -84,10 +84,8 @@ func (db *KV) Get(key []byte) ([]byte, bool) {
 
 // Set apeleaza emtoda interna a tree si
 // actualizeaza fisierul
-func (db *KV) Set(key []byte, val []byte) error {
-	meta := saveMeta(db)
-	db.tree.Insert(key, val)
-	return updateOrRevert(db, meta)
+func (db *KV) Set(key []byte, val []byte) (bool, error) {
+	return db.Update(key, val, MODE_UPSERT)
 }
 
 // Update apeleaza metoda interna a tree si
