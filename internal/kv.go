@@ -90,6 +90,22 @@ func (db *KV) Set(key []byte, val []byte) error {
 	return updateOrRevert(db, meta)
 }
 
+// Update apeleaza metoda interna a tree si
+// actualizeaza fisierul
+func (db *KV) Update(key []byte, val []byte, mode int) (bool, error) {
+	req := &UpdateReq{
+		Key:  key,
+		Val:  val,
+		Mode: mode,
+	}
+
+	meta := saveMeta(db)
+	db.tree.Update(req)
+	err := updateOrRevert(db, meta)
+
+	return req.Added, err
+}
+
 // Del apeleaza metoda interna a tree, actualizeaza fisierul
 // si returneaza un tuplu (sters, erroare)
 func (db *KV) Del(key []byte) (bool, error) {

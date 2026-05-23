@@ -28,6 +28,22 @@ type BTree struct {
 	del func(uint64)
 }
 
+type UpdateReq struct {
+	tree *BTree
+	// out
+	Added bool // a adaugat o cheie noua
+	// in
+	Key  []byte
+	Val  []byte
+	Mode int
+}
+
+const (
+	MODE_UPSERT      = 0 // insert sau replace
+	MODE_UPDATE_ONLY = 1 // actualizeaza cheile existente
+	MODE_INSERT_ONLY = 2 // doar adauga chei noi
+)
+
 const (
 	BNODE_NODE = 1
 	BNODE_LEAF = 2
@@ -500,4 +516,67 @@ func (tree *BTree) Get(key []byte) ([]byte, bool) {
 	}
 
 	return []byte{}, false
+}
+
+func treeUpdate(tree *BTree, node BNode, req *UpdateReq) BNode {
+	new := BNode(make([]byte, 2*BTREE_PAGE_SIZE))
+	idx := nodeLookupLE(node, req.Key)
+
+	switch node.btype() {
+	case BNODE_LEAF:
+		return leafUpdateMode(tree, new, node, req, idx)
+	case BNODE_NODE:
+		nodeUpdate(tree)
+	default:
+		panic("bad node")
+	}
+
+}
+
+// leafUpdateMode actualizeaza un nod in frunza in functie
+// de modul dat, INSERT, UPDATE, UPSERT
+func leafUpdateMode(
+	tree *BTree, new BNode, old BNode,
+	req *UpdateReq, idx uint16,
+) BNode {
+	switch req.Mode {
+	case MODE_INSERT_ONLY:
+		if bytes.Equal(req.Key, old.getKey(idx)) {
+			req.Added = false
+			return BNode{}
+		}
+
+		leafInsert(new, old, idx+1, req.Key, req.Val)
+		req.Added = true
+	case MODE_UPDATE_ONLY:
+		if !bytes.Equal(req.Key, old.getKey(idx)) {
+			req.Added = false
+			return BNode{}
+		}
+
+		leafUpdate(new, old, idx, req.Key, req.Val)
+		req.Added = false
+	case MODE_UPSERT:
+		if bytes.Equal(req.Key, old.getKey(idx)) {
+			leafUpdate(new, old, idx, req.Key, req.Val)
+			req.Added = false
+		} else {
+			leafInsert(new, old, idx+1, req.Key, req.Val)
+			req.Added = true
+		}
+	default:
+		panic("bad mode")
+	}
+
+	return new
+}
+
+func nodeUpdate(
+	tree *BTree, node BNode, idx uint16, req *UpdateReq,
+) {
+
+}
+
+func (tree *BTree) Update(req *UpdateReq) {
+
 }

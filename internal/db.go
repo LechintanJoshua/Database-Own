@@ -110,6 +110,26 @@ func encodeKey(out []byte, prefix uint32, vals []Value) []byte {
 	return out
 }
 
+// codifica valorile ramase dupa cheia primara
+func encodeValues(out []byte, vals []Value) []byte {
+	sizeBuf := make([]byte, 4)
+	buff := make([]byte, 8)
+
+	for _, v := range vals {
+		switch v.Type {
+		case TYPE_BYTES:
+			binary.LittleEndian.PutUint32(sizeBuf[:], uint32(len(v.Str)))
+			out = append(out, sizeBuf...)
+			out = append(out, v.Str...)
+		case TYPE_INT64:
+			binary.LittleEndian.PutUint64(buff[:], uint64(v.I64))
+			out = append(out, buff...)
+		}
+	}
+
+	return out
+}
+
 // decodifica valorile primite de pe disc in tipul Value
 func decodeValues(in []byte, out []Value) {
 	// stiu ca 4 bytes sunt prea multi pentru cate date am
@@ -147,4 +167,16 @@ func getTableDef(db *DB, name string) *TableDef {
 	err = json.Unmarshal(rec.Get("def").Str, tdef)
 	assert(err == nil)
 	return tdef
+}
+
+// dbUpdate actualizeaza o tabela in trei moduri
+// insert, update sau upsert
+func dbUpdate(db *DB, tdef *TableDef, rec Record, mode int) (bool, error) {
+	values, err := checkRecord(tdef, rec, len(tdef.Cols))
+	if err != nil {
+		return false, err
+	}
+	key := encodeKey(nil, tdef.Prefix, values[:tdef.PKeys])
+	val := encodeValues(nil, values[tdef.PKeys:])
+	return db.kv.Update(key, val, mode)
 }
