@@ -22,10 +22,45 @@ func (db *DB) Get(table string, rec *Record) (bool, error) {
 	return dbGet(db, tdef, rec)
 }
 
-func (db *DB) Insert(table string, rec Record) (bool, error)
-func (db *DB) Update(table string, rec Record) (bool, error)
-func (db *DB) Upsert(table string, rec Record) (bool, error)
-func (db *DB) Delete(table string, rec Record) (bool, error)
+// Insert verifica daca tabela exista, si insereaca un rand in ea
+func (db *DB) Insert(table string, rec Record) (bool, error) {
+	tdef := getTableDef(db, table)
+	if tdef == nil {
+		return false, fmt.Errorf("table not found: %s", table)
+	}
+
+	return dbUpdate(db, tdef, rec, MODE_INSERT_ONLY)
+}
+
+// Update verifica daca tabela exista si actualizeaza un rand in ea
+func (db *DB) Update(table string, rec Record) (bool, error) {
+	tdef := getTableDef(db, table)
+	if tdef == nil {
+		return false, fmt.Errorf("table not found: %s", table)
+	}
+
+	return dbUpdate(db, tdef, rec, MODE_UPDATE_ONLY)
+}
+
+// Upsert verifica daca tabela exista si actualizeaza sau scrie
+// un rand in ea
+func (db *DB) Upsert(table string, rec Record) (bool, error) {
+	tdef := getTableDef(db, table)
+	if tdef == nil {
+		return false, fmt.Errorf("table not found: %s", table)
+	}
+	return dbUpdate(db, tdef, rec, MODE_UPSERT)
+}
+
+// Delete verifica daca tabela exista si sterge un rand din ea
+func (db *DB) Delete(table string, rec Record) (bool, error) {
+	tdef := getTableDef(db, table)
+	if tdef == nil {
+		return false, fmt.Errorf("table not found: %s", table)
+	}
+
+	return dbDelete(db, tdef, rec)
+}
 
 // dbGet obtine un rand dintr-un tabel pe baza chei primare,
 // populeaza structura rec si returneaza un tuplu
@@ -231,4 +266,14 @@ func (db *DB) TableNew(tdef *TableDef) error {
 	}
 
 	return nil
+}
+
+// dbDelete sterge un rand dintr-o tabela
+func dbDelete(db *DB, tdef *TableDef, rec Record) (bool, error) {
+	values, err := checkRecord(tdef, rec, tdef.PKeys)
+	if err != nil {
+		return false, err
+	}
+	key := encodeKey(nil, tdef.Prefix, values[:tdef.PKeys])
+	return db.kv.Del(key)
 }
