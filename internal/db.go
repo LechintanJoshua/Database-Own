@@ -180,3 +180,55 @@ func dbUpdate(db *DB, tdef *TableDef, rec Record, mode int) (bool, error) {
 	val := encodeValues(nil, values[tdef.PKeys:])
 	return db.kv.Update(key, val, mode)
 }
+
+// TableNew verifica daca tabela exista deja
+// altfel creaza o tabela noua
+// incrementeaza contorul in @meta si adauga
+// schema la @table
+func (db *DB) TableNew(tdef *TableDef) error {
+	if getTableDef(db, tdef.Name) != nil {
+		return fmt.Errorf("table already exists: %s", tdef.Name)
+	}
+
+	rec := (&Record{}).AddStr("key", []byte("next_prefix"))
+	ok, err := dbGet(db, TDEF_META, rec)
+	var nextPrefix uint32
+
+	if err != nil {
+		return err
+	}
+
+	if !ok {
+		nextPrefix = 3
+		rec.AddStr("value", make([]byte, 4))
+	} else {
+		nextPrefix = binary.LittleEndian.Uint32(rec.Get("value").Str[:])
+	}
+
+	tdef.Prefix = nextPrefix
+	nextPrefix++
+	binary.LittleEndian.PutUint32(rec.Get("value").Str[:], nextPrefix)
+
+	_, err = dbUpdate(db, TDEF_META, *rec, MODE_UPSERT)
+
+	if err != nil {
+		return err
+	}
+
+	value, err := json.Marshal(tdef)
+
+	if err != nil {
+		return err
+	}
+
+	rec = (&Record{}).AddStr("name", []byte(tdef.Name))
+	rec.AddStr("def", value)
+
+	_, err = dbUpdate(db, TDEF_TABLE, *rec, MODE_UPSERT)
+
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
