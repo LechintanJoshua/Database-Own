@@ -66,21 +66,17 @@ func (db *DB) Delete(table string, rec Record) (bool, error) {
 // populeaza structura rec si returneaza un tuplu
 // pentru existensa sa si eroare
 func dbGet(db *DB, tdef *TableDef, rec *Record) (bool, error) {
-	// 1. reordoneaza coloanele din input dupa schema
 	values, err := checkRecord(tdef, *rec, tdef.PKeys)
 	if err != nil {
 		return false, err
 	}
 
-	// 2. codifica cheia primara
 	key := encodeKey(nil, tdef.Prefix, values[:tdef.PKeys])
-	// 3. interogheaza stocare KV
 	val, ok := db.kv.Get(key)
 	if !ok {
 		return false, nil
 	}
 
-	// 4. decodifica valorile in coloane
 	for i := tdef.PKeys; i < len(tdef.Cols); i++ {
 		values[i].Type = tdef.Types[i]
 	}
@@ -134,9 +130,6 @@ func encodeKey(out []byte, prefix uint32, vals []Value) []byte {
 			out = append(out, size...)
 			out = append(out, v.Str...)
 		case TYPE_INT64:
-			// va trebui updatata sa foloseasca alta metoda
-			// de codificare, pentru a nu pierder bitul
-			// de semn si a corupe datele
 			binary.LittleEndian.PutUint64(buff[:], uint64(v.I64))
 			out = append(out, buff...)
 		}
@@ -167,9 +160,6 @@ func encodeValues(out []byte, vals []Value) []byte {
 
 // decodifica valorile primite de pe disc in tipul Value
 func decodeValues(in []byte, out []Value) {
-	// stiu ca 4 bytes sunt prea multi pentru cate date am
-	// nevoie dar nu mai vreau sa ma compli cu casting
-	// pentru doar 2 bytes
 	idx := uint32(0)
 
 	for i, v := range out {

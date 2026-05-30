@@ -29,19 +29,17 @@ type BTree struct {
 }
 
 type UpdateReq struct {
-	tree *BTree
-	// out
-	Added bool // a adaugat o cheie noua
-	// in
-	Key  []byte
-	Val  []byte
-	Mode int
+	tree  *BTree
+	Added bool
+	Key   []byte
+	Val   []byte
+	Mode  int
 }
 
 const (
-	MODE_UPSERT      = 0 // insert sau replace
-	MODE_UPDATE_ONLY = 1 // actualizeaza cheile existente
-	MODE_INSERT_ONLY = 2 // doar adauga chei noi
+	MODE_UPSERT      = 0
+	MODE_UPDATE_ONLY = 1
+	MODE_INSERT_ONLY = 2
 )
 
 const (
@@ -600,12 +598,10 @@ func nodeUpdate(
 // Update actualizeaza o cheie in functie
 // de trei moduri, INSERT, UPSERT, UPDATE
 func (tree *BTree) Update(req *UpdateReq) {
-	// daca arborele e gol, nu poti actualiza nimic
 	if tree.root == 0 && req.Mode == MODE_UPDATE_ONLY {
 		return
 	}
 
-	// altfel daca e upsert sau insert doar insereaza
 	if tree.root == 0 {
 		root := BNode(make([]byte, BTREE_PAGE_SIZE))
 		root.setHeader(BNODE_LEAF, 2)

@@ -101,7 +101,6 @@ func flPop(fl *FreeList) (ptr uint64, head uint64) {
 	ptr = node.getPtr(seq2idx(fl.headSeq))
 	fl.headSeq++
 
-	// mutam head-ul la urmatorul nod daca a devenint gol
 	if seq2idx(fl.headSeq) == 0 {
 		head, fl.headPage = fl.headPage, node.getNext()
 		assert(fl.headPage != 0)

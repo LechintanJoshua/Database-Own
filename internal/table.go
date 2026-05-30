@@ -1,13 +1,13 @@
 package internal
 
 const (
-	TYPE_BYTES = 1 // string (de bytes arbitrari)
-	TYPE_INT64 = 2 // integer; 64-bit cu semn
+	TYPE_BYTES = 1
+	TYPE_INT64 = 2
 )
 
 // celula tabelei
 type Value struct {
-	Type uint32 // uniune ca sa stim ce tip de date stocam in celula
+	Type uint32
 	I64  int64
 	Str  []byte
 }
@@ -19,12 +19,10 @@ type Record struct {
 }
 
 type TableDef struct {
-	// definita de utilizator
-	Name  string
-	Types []uint32 // tipul coloanelor
-	Cols  []string // numele coloanelor
-	PKeys int      // primele 'PKeys' coloane sunt cheile primare
-	// cheie auto asignata de BTree ca prefix a diferitelor tabele
+	Name   string
+	Types  []uint32
+	Cols   []string
+	PKeys  int
 	Prefix uint32
 }
 
