@@ -666,10 +666,32 @@ func (tree *BTree) SeekLe(key []byte) *BIter {
 }
 
 // obtine pereche curenta KV
-func (iter *BIter) Deref() ([]byte, []byte)
+func (iter *BIter) Deref() ([]byte, []byte) {
+	if !iter.Valid() {
+		return nil, nil
+	}
 
-// Preconditie pentru Defer()
-func (iter *BIter) Valid() bool
+	node := iter.path[len(iter.path)-1]
+	idx := iter.pos[len(iter.pos)-1]
+	return node.getKey(idx), node.getVal(idx)
+}
+
+// Valid este o precondifie pentur Defer
+// Functia verifica daca arborele nu este gol
+// si daca nu s-a intamplat vreo stricaciune
+// in urma apelarii Prev si Next
+// verifica daca ultima pozitie este mai mica
+// decat numarul de chei din ultimul nod
+func (iter *BIter) Valid() bool {
+	if len(iter.path) == 0 {
+		return false
+	}
+
+	lastPos := iter.pos[len(iter.pos)-1]
+	maxKeys := iter.path[len(iter.path)-1].nkeys()
+
+	return lastPos < maxKeys
+}
 
 // Prev muta iteratorul la cheia precedenta
 func (iter *BIter) Prev() {
@@ -718,4 +740,31 @@ func iterPrev(iter *BIter, level int) {
 		iter.path[level+1] = kid
 		iter.pos[level+1] = kid.nkeys() - 1
 	}
+}
+
+// Seek obtine cheia urmatoare pe baza unei comparatii
+// greater than, greater equal, lesser than, leser equal
+func (tree *BTree) Seek(key []byte, cmp int) *BIter {
+	iter := tree.SeekLe(key)
+	actKey, _ := iter.Deref()
+	eq := bytes.Compare(actKey, key)
+	switch cmp {
+	case CMP_GE:
+		if eq != 0 {
+			iter.Next()
+		}
+	case CMP_GT:
+		iter.Next()
+	case CMP_LE:
+		// conditia asta este deja rezolvata, seekLe deja imi da
+		// ce imi doresc. deci o pott lasa goala
+	case CMP_LT:
+		if eq == 0 {
+			iter.Prev()
+		}
+	default:
+		panic("bad compare")
+	}
+
+	return iter
 }
