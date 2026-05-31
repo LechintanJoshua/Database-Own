@@ -36,6 +36,12 @@ type UpdateReq struct {
 	Mode  int
 }
 
+type BIter struct {
+	tree *BTree
+	path []BNode  // de la radacina la frunza
+	pos  []uint16 // indexul la noduri
+}
+
 const (
 	MODE_UPSERT      = 0
 	MODE_UPDATE_ONLY = 1
@@ -45,6 +51,13 @@ const (
 const (
 	BNODE_NODE = 1
 	BNODE_LEAF = 2
+)
+
+const (
+	CMP_GE = +3
+	CMP_GT = +2
+	CMP_LT = -2
+	CMP_LE = -3
 )
 
 // btype citeste din blocul de memorie pentru a afla daca
@@ -634,5 +647,54 @@ func (tree *BTree) Update(req *UpdateReq) {
 		tree.root = tree.new(root)
 	} else {
 		tree.root = tree.new(split[0])
+	}
+}
+
+// SeekLe gaseste cea mai apropiata posizie care este mai mica
+// sau egala cu cheia
+func (tree *BTree) SeekLe(key []byte) *BIter {
+	iter := &BIter{tree: tree}
+	for ptr := tree.root; ptr != 0; {
+		node := BNode(tree.get(ptr))
+		idx := nodeLookupLE(node, key)
+		iter.path = append(iter.path, node)
+		iter.pos = append(iter.pos, idx)
+		ptr = node.getPtr(idx)
+	}
+
+	return iter
+}
+
+// obtine pereche curenta KV
+func (iter *BIter) Deref() ([]byte, []byte)
+
+// Preconditie pentru Defer()
+func (iter *BIter) Valid() bool
+
+// miscare inapoi si inainte
+func (iter *BIter) Prev()
+
+// Next muta iteratorul la urmatoarea cheie
+func (iter *BIter) Next() {
+	iterNext(iter, len(iter.path)-1)
+}
+
+// iterNext verifica daca arborele mai are chei si actualizeaza
+// cheia la urmatoarea din frunza
+// parcurge arborele in DFS
+func iterNext(iter *BIter, level int) {
+	if iter.pos[level]+1 < iter.path[level].nkeys() {
+		iter.pos[level]++ // miscare in aces nod
+	} else if level > 0 {
+		iterNext(iter, level-1) // miscare la un nod frate
+	} else {
+		iter.pos[len(iter.pos)-1]++ // dupa ultima cheie
+	}
+
+	if level+1 < len(iter.pos) { // actualizeaza nodul copil
+		node := iter.path[level]
+		kid := BNode(iter.tree.get(node.getPtr(iter.pos[level])))
+		iter.path[level+1] = kid
+		iter.pos[level+1] = 0
 	}
 }
