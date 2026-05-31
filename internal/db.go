@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -9,6 +10,18 @@ import (
 type DB struct {
 	Path string
 	kv   KV
+}
+
+// Scanner este wrapper peste BIterator
+type Scanner struct {
+	// range-ul, de la cheia 1 la cheia 2
+	Cmp1   int // CMP_?
+	Cmp2   int
+	Key1   Record
+	Key2   Record
+	iter   *BIter
+	tdef   *TableDef
+	keyEnd []byte
 }
 
 // Get cauta definitia tabelei si daca aceasta exista
@@ -266,4 +279,74 @@ func dbDelete(db *DB, tdef *TableDef, rec Record) (bool, error) {
 	}
 	key := encodeKey(nil, tdef.Prefix, values[:tdef.PKeys])
 	return db.kv.Del(key)
+}
+
+// Valid verifica daca suntem in range-ul dat
+func (sc *Scanner) Valid() bool {
+	if !sc.iter.Valid() {
+		return false
+	}
+
+	var cond bool
+	key, _ := sc.iter.Deref()
+	cmp := bytes.Compare(key, sc.keyEnd)
+
+	switch sc.Cmp2 {
+	case CMP_GE:
+		cond = cmp >= 0
+	case CMP_GT:
+		cond = cmp > 0
+	case CMP_LE:
+		cond = cmp <= 0
+	case CMP_LT:
+		cond = cmp < 0
+	default:
+		panic("bad compare")
+	}
+
+	return cond
+}
+
+// Next muta iteratorul
+func (sc *Scanner) Next() {
+	sc.iter.Next()
+}
+
+// Deref aduce randul curent si il salveaza in record
+func (sc *Scanner) Deref(rec *Record) {
+	key, val := sc.iter.Deref()
+	rec.Cols = sc.tdef.Cols
+	data := make([]Value, len(sc.tdef.Cols))
+	for i, t := range sc.tdef.Types {
+		data[i].Type = t
+	}
+	decodeKeys(key, data[:sc.tdef.PKeys])
+	decodeValues(val, data[sc.tdef.PKeys:])
+	rec.Vals = data
+}
+
+// Scan obtine definitia tabelei de pe disc si
+// porneste iteratorul de la prima cheie
+func (db *DB) Scan(table string, req *Scanner) error {
+	var err error
+	req.tdef = getTableDef(db, table)
+	if req.tdef == nil {
+		return fmt.Errorf("table not found: %s", table)
+	}
+
+	req.Key1.Vals, err = checkRecord(req.tdef, req.Key1, req.tdef.PKeys)
+	if err != nil {
+		return err
+	}
+
+	req.Key2.Vals, err = checkRecord(req.tdef, req.Key2, req.tdef.PKeys)
+	if err != nil {
+		return err
+	}
+
+	keyStart := encodeKey(nil, req.tdef.Prefix, req.Key1.Vals[:req.tdef.PKeys])
+	req.keyEnd = encodeKey(nil, req.tdef.Prefix, req.Key2.Vals[:req.tdef.PKeys])
+	req.iter = db.kv.tree.Seek(keyStart, req.Cmp1)
+
+	return nil
 }
