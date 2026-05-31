@@ -671,8 +671,10 @@ func (iter *BIter) Deref() ([]byte, []byte)
 // Preconditie pentru Defer()
 func (iter *BIter) Valid() bool
 
-// miscare inapoi si inainte
-func (iter *BIter) Prev()
+// Prev muta iteratorul la cheia precedenta
+func (iter *BIter) Prev() {
+	iterPrev(iter, len(iter.path)-1)
+}
 
 // Next muta iteratorul la urmatoarea cheie
 func (iter *BIter) Next() {
@@ -696,5 +698,24 @@ func iterNext(iter *BIter, level int) {
 		kid := BNode(iter.tree.get(node.getPtr(iter.pos[level])))
 		iter.path[level+1] = kid
 		iter.pos[level+1] = 0
+	}
+}
+
+// iterPrev verifica daca arborele mai are chei si actualizeaza
+// cheia la cea precedenta din frunza
+func iterPrev(iter *BIter, level int) {
+	if iter.pos[level] > 0 {
+		iter.pos[level]-- // miscare inapoi la frate
+	} else if level > 0 {
+		iterPrev(iter, level-1) // merg in parinte
+	} else {
+		iter.pos[len(iter.pos)-1]-- // nu mai sunt chei
+	}
+
+	if level+1 < len(iter.pos) { // actualizeaza nodul copil
+		node := iter.path[level]
+		kid := BNode(iter.tree.get(node.getPtr(iter.pos[level])))
+		iter.path[level+1] = kid
+		iter.pos[level+1] = kid.nkeys() - 1
 	}
 }
