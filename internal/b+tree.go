@@ -750,16 +750,25 @@ func (tree *BTree) Seek(key []byte, cmp int) *BIter {
 	eq := bytes.Compare(actKey, key)
 	switch cmp {
 	case CMP_GE:
-		if eq != 0 {
+		// pai ar trebui sa fie mai mic decat 0
+		// caci daca e egal e bun, suntem pe ocheie buna,
+		// daca e mai mare iara este bine
+		if eq < 0 {
 			iter.Next()
 		}
 	case CMP_GT:
-		iter.Next()
+		// daca nu este strict mai mare incrementam
+		if eq < 1 {
+			iter.Next()
+		}
 	case CMP_LE:
-		// conditia asta este deja rezolvata, seekLe deja imi da
-		// ce imi doresc. deci o pott lasa goala
+		if eq > 0 {
+			iter.Prev()
+		}
 	case CMP_LT:
-		if eq == 0 {
+		// daca suntem pe o cheie mai mare sau egala, mergem
+		// inapoi
+		if eq >= 0 {
 			iter.Prev()
 		}
 	default:

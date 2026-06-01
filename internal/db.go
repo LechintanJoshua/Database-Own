@@ -127,7 +127,7 @@ func checkRecord(tdef *TableDef, rec Record, n int) ([]Value, error) {
 	return values, err
 }
 
-// codifica coloanele pentru a afla cheia lor in arbore
+// encodeKey codifica coloanele pentru a afla cheia lor in arbore
 func encodeKey(out []byte, prefix uint32, vals []Value) []byte {
 	prefBuf := make([]byte, 4)
 	size := make([]byte, 4)
@@ -151,7 +151,7 @@ func encodeKey(out []byte, prefix uint32, vals []Value) []byte {
 	return out
 }
 
-// codifica valorile ramase dupa cheia primara
+// encodeValues codifica valorile ramase dupa cheia primara
 func encodeValues(out []byte, vals []Value) []byte {
 	sizeBuf := make([]byte, 4)
 	buff := make([]byte, 8)
@@ -171,7 +171,61 @@ func encodeValues(out []byte, vals []Value) []byte {
 	return out
 }
 
-// decodifica valorile primite de pe disc in tipul Value
+// decodeBytes este o functie ajutatoare pentru a decodifica
+// valorile de tip byte de pe disc
+// decodifica in functie de escape bytes, 0x00, 0x01, 0x02
+func decodeBytes(in []byte, out []byte, idx uint32) ([]byte, uint32) {
+	for idx < uint32(len(in)) {
+		b := in[idx]
+
+		switch b {
+		case 0x00:
+			idx++
+			return out, idx
+		case 0x01:
+			nextB := in[idx+1]
+			if nextB == 0x01 {
+				out = append(out, 0x00)
+			}
+			if nextB == 0x02 {
+				out = append(out, 0x01)
+			}
+			idx += 2
+		default:
+			out = append(out, b)
+			idx++
+
+		}
+	}
+
+	return out, idx
+}
+
+// decodeKeys decodifica chiele primite de pe disc
+// in tipul Value
+func decodeKeys(in []byte, out []Value) {
+	idx := uint32(4)
+	var s []byte
+
+	for i, v := range out {
+		switch v.Type {
+		case TYPE_BYTES:
+			s = []byte{}
+			s, idx = decodeBytes(in, s, idx)
+			out[i].Str = s
+		case TYPE_INT64:
+			// schimbare bit semn
+			u := int64(binary.BigEndian.Uint64(in[idx:]) - (1 << 63))
+			out[i].I64 = u
+			idx += 8
+		default:
+			panic("bad type")
+		}
+	}
+}
+
+// decodeValues decodifica valorile primite de pe
+// disc in tipul Value
 func decodeValues(in []byte, out []Value) {
 	idx := uint32(0)
 
