@@ -14,8 +14,7 @@ type DB struct {
 
 // Scanner este wrapper peste BIterator
 type Scanner struct {
-	// range-ul, de la cheia 1 la cheia 2
-	Cmp1   int // CMP_?
+	Cmp1   int
 	Cmp2   int
 	Key1   Record
 	Key2   Record

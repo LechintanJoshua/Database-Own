@@ -38,8 +38,8 @@ type UpdateReq struct {
 
 type BIter struct {
 	tree *BTree
-	path []BNode  // de la radacina la frunza
-	pos  []uint16 // indexul la noduri
+	path []BNode
+	pos  []uint16
 }
 
 const (
@@ -708,14 +708,14 @@ func (iter *BIter) Next() {
 // parcurge arborele in DFS
 func iterNext(iter *BIter, level int) {
 	if iter.pos[level]+1 < iter.path[level].nkeys() {
-		iter.pos[level]++ // miscare in aces nod
+		iter.pos[level]++
 	} else if level > 0 {
-		iterNext(iter, level-1) // miscare la un nod frate
+		iterNext(iter, level-1)
 	} else {
-		iter.pos[len(iter.pos)-1]++ // dupa ultima cheie
+		iter.pos[len(iter.pos)-1]++
 	}
 
-	if level+1 < len(iter.pos) { // actualizeaza nodul copil
+	if level+1 < len(iter.pos) {
 		node := iter.path[level]
 		kid := BNode(iter.tree.get(node.getPtr(iter.pos[level])))
 		iter.path[level+1] = kid
@@ -750,14 +750,10 @@ func (tree *BTree) Seek(key []byte, cmp int) *BIter {
 	eq := bytes.Compare(actKey, key)
 	switch cmp {
 	case CMP_GE:
-		// pai ar trebui sa fie mai mic decat 0
-		// caci daca e egal e bun, suntem pe ocheie buna,
-		// daca e mai mare iara este bine
 		if eq < 0 {
 			iter.Next()
 		}
 	case CMP_GT:
-		// daca nu este strict mai mare incrementam
 		if eq < 1 {
 			iter.Next()
 		}
@@ -766,8 +762,6 @@ func (tree *BTree) Seek(key []byte, cmp int) *BIter {
 			iter.Prev()
 		}
 	case CMP_LT:
-		// daca suntem pe o cheie mai mare sau egala, mergem
-		// inapoi
 		if eq >= 0 {
 			iter.Prev()
 		}
