@@ -171,14 +171,13 @@ func removeNodeListTable(cache *LRUCache) {
 
 	hash := hashKey(key)
 	curr := cache.table[hash].head
-	tail := cache.table[hash].tail
 	for curr.next.pagePtr != key {
 		curr = curr.next
 	}
 
 	deleted := curr.next
-	if deleted == tail {
-		tail = curr
+	if deleted == cache.table[hash].tail {
+		cache.table[hash].tail = curr
 	}
 
 	curr.next = deleted.next
