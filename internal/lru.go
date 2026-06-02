@@ -15,16 +15,16 @@ type Bucket struct {
 }
 
 type BucketNode struct {
-	key        []byte
+	pagePtr    uint64
 	lruPointer *LRUNode
 	next       *BucketNode
 }
 
 type LRUNode struct {
-	key    []byte
-	values []byte
-	next   *LRUNode
-	prev   *LRUNode
+	pagePtr  uint64
+	pageData BNode
+	next     *LRUNode
+	prev     *LRUNode
 }
 
 type LRUList struct {
@@ -60,18 +60,13 @@ func initializeTable() *HashTable {
 	return ht
 }
 
-// Functie pentru transformarea unei chei intr-un
-// hash folosind algoritmul FNV-1a pentur 32bits
-func hashKey(key []byte) uint32 {
-	var offset uint32 = 2166136261
-	var prime uint32 = 16777619
-
-	for _, b := range key {
-		offset ^= uint32(b)
-		offset *= prime
-	}
-
-	return offset & (TABLE_SIZE - 1)
+// Functie pentru transformarea unei chei
+// intr-o valoare hash
+// cheia este de tip uint64 deoarece reprezinta un pointer
+// catre locatia fizica pe disc a nodului
+func hashKey(key uint64) uint32 {
+	hash := key * 2654435761
+	return uint32(hash) & (TABLE_SIZE - 1)
 }
 
 // initLRUList initializeaza lista dubla inlantuita pentru
@@ -102,3 +97,5 @@ func InitLRUCache() *LRUCache {
 		list:     initLRUList(),
 	}
 }
+
+func (cache *LRUCache) Get(key []byte)
