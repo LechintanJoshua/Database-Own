@@ -5,10 +5,6 @@ const (
 	CACHE_CAP  = 100
 )
 
-type HashTable struct {
-	table [TABLE_SIZE]*Bucket
-}
-
 type Bucket struct {
 	head *BucketNode
 	tail *BucketNode
@@ -22,7 +18,7 @@ type BucketNode struct {
 
 type LRUNode struct {
 	pagePtr  uint64
-	pageData BNode
+	pageData []byte
 	next     *LRUNode
 	prev     *LRUNode
 }
@@ -35,8 +31,9 @@ type LRUList struct {
 type LRUCache struct {
 	capacity int
 	size     int
-	table    *HashTable
-	list     *LRUList
+	// table reprezinta hashtable-ul
+	table [TABLE_SIZE]*Bucket
+	list  *LRUList
 }
 
 // initBucketSentinel este folosita pentru a crea un nod santinela
@@ -47,17 +44,6 @@ func initBucketSentinel() *Bucket {
 		head: buckNode,
 		tail: buckNode,
 	}
-}
-
-// InitializeTable initializeaza fiecare valoare din table cu
-// o lista inlantuita ce contine un singur nod gol santinela
-func initializeTable() *HashTable {
-	ht := &HashTable{}
-	for i := range ht.table {
-		ht.table[i] = initBucketSentinel()
-	}
-
-	return ht
 }
 
 // Functie pentru transformarea unei chei
@@ -90,12 +76,45 @@ func initLRUList() *LRUList {
 // capacitatea este hardcodata la 100
 // nodurile santinela vor fi ignorate
 func InitLRUCache() *LRUCache {
-	return &LRUCache{
+	cache := &LRUCache{
 		capacity: CACHE_CAP,
 		size:     0,
-		table:    initializeTable(),
 		list:     initLRUList(),
 	}
+
+	for i := range cache.table {
+		cache.table[i] = initBucketSentinel()
+	}
+
+	return cache
 }
 
-func (cache *LRUCache) Get(key []byte)
+// Get verifica daca o cheie este stocata in hashtable
+// si returneaza valoarea ei, respectiv un slice gol
+// totodata in cazul de Cache Hit actualizeaza
+// lista LRU
+func (cache *LRUCache) Get(key uint64) []byte {
+	hash := hashKey(key)
+	// pornire dupa nodul santinela
+	curr := cache.table[hash].head.next
+	for curr != nil {
+		if curr.pagePtr == key {
+			break
+		}
+		curr = curr.next
+	}
+	if curr == nil {
+		return nil
+	}
+
+	hitNode := curr.lruPointer
+	head := cache.list.head
+	hitNode.prev.next = hitNode.next
+	hitNode.next.prev = hitNode.prev
+	hitNode.next = head.next
+	head.next.prev = hitNode
+	hitNode.prev = head
+	head.next = hitNode
+
+	return hitNode.pageData
+}
