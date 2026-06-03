@@ -113,6 +113,29 @@ func addUpdatesToRecord(args []string, pos int, rec *internal.Record) error {
 	return nil
 }
 
+// checkLimAndPrintRows verifica limita obtinuta si afiseaza toate
+// randurile pana la acea limita din tabela. Daca limita < 0 se opreste,
+// daca nu este data ca argument se presupune toata tabela
+func checkLimAndPrintRows(tableName string, db *internal.DB, args []string) {
+	limit := 0
+	if len(args) > 1 {
+		var err error
+		limit, err = strconv.Atoi(args[1])
+		if err != nil {
+			fmt.Println("Limita trebuie sa fie un numar intreg valid.")
+			return
+		}
+	}
+
+	sc, err := db.ScanAll(tableName)
+	if err != nil {
+		fmt.Printf("Eroare la initializare scanner: %v\n", err)
+		return
+	}
+
+	internal.PrintTableResults(tableName, sc, limit)
+}
+
 // insertCmd gestioneaza inserarea unui rand intreg intr-un tabel
 var insertCmd = &cobra.Command{
 	Use:   "insert [tabel] [col1=val1] [col2=val2]...",
@@ -268,5 +291,17 @@ var updateCmd = &cobra.Command{
 		}
 
 		fmt.Println("Randul a fost actualizat cu succes!")
+	},
+}
+
+var listCmd = &cobra.Command{
+	Use:   "list-table [tabel] [limita]",
+	Short: "Afiseaza randurile dintr-o tabela pana la o limita data",
+	Args:  cobra.MinimumNArgs(1),
+	Run: func(cmd *cobra.Command, args []string) {
+		tableName, db := parseNameAndOpenFile(args)
+		defer db.Close()
+
+		checkLimAndPrintRows(tableName, db, args)
 	},
 }

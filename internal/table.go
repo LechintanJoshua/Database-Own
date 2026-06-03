@@ -81,7 +81,7 @@ func PrintRecord(rec *Record) {
 	for i, colName := range rec.Cols {
 		val := rec.Vals[i]
 
-		if len(val.Str) > 0 || val.Type == 0 {
+		if len(val.Str) > 0 || val.Type == TYPE_BYTES {
 			fmt.Printf("%s: %s\n", colName, string(val.Str))
 		} else {
 			fmt.Printf("%s: %d\n", colName, val.I64)
@@ -93,24 +93,23 @@ func PrintRecord(rec *Record) {
 // PrintTableResults parcurge un scanner si afiseaza fiecare rand pe o singura linie,
 // unde limit reprezinta numarul maxim de randuri din tabela afisate
 func PrintTableResults(tableName string, sc *Scanner, limit int) {
-	if limit <= 0 {
-		fmt.Println("Limita este prea mica, valoarea trebuie sa fie mai mare decat 0")
-		return
-	}
-
 	fmt.Printf("\n=== Date din tabela: %s ===\n", tableName)
 
 	rec := &Record{}
 	count := 0
 
-	for sc.Valid() && count >= limit {
+	for sc.Valid() {
+		if limit > 0 && count >= limit {
+			break
+		}
+
 		sc.Deref(rec)
 
 		var rowInfo []string
 		for i, colName := range rec.Cols {
 			val := rec.Vals[i]
 
-			if len(val.Str) > 0 || val.Type == 0 {
+			if len(val.Str) > 0 || val.Type == TYPE_BYTES {
 				rowInfo = append(rowInfo, fmt.Sprintf("%s: %s", colName, string(val.Str)))
 			} else {
 				rowInfo = append(rowInfo, fmt.Sprintf("%s: %d", colName, val.I64))
