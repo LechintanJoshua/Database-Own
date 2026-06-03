@@ -35,7 +35,7 @@ func parseNameAndOpenFile(args []string) (string, *internal.DB) {
 
 // addArgsToRecord preia datele date de pe linia de comanda
 // si le adauga intr-un rand, returnand o eroare daca formatul e gresit
-func addArgsToRecord(args []string, pos int, rec *internal.Record) error {
+func addArgsToRecord(args []string, pos int, rec *internal.Record, tdef *internal.TableDef) error {
 	for _, arg := range args[pos:] {
 		parts := strings.SplitN(arg, "=", 2)
 		if len(parts) != 2 {
@@ -44,13 +44,40 @@ func addArgsToRecord(args []string, pos int, rec *internal.Record) error {
 		colName := parts[0]
 		colVal := parts[1]
 
-		if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
+		idx := getRightIdx(colName, tdef)
+		if idx == -1 {
+			return fmt.Errorf("coloana '%s' nu exista in tabel", colName)
+		}
+
+		colType := tdef.Types[idx]
+
+		switch colType {
+		case internal.TYPE_INT64:
+			valInt, err := strconv.ParseInt(colVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("valoarea pentru coloana '%s' trebuie sa fie un numar intreg", colName)
+			}
 			rec.AddInt64(colName, valInt)
-		} else {
+		case internal.TYPE_BYTES:
 			rec.AddStr(colName, []byte(colVal))
+
 		}
 	}
 	return nil
+}
+
+// getRightIdx verifica daca tabela contine numele coloanei si
+// obtine index-ul corespunzator
+func getRightIdx(colName string, tdef *internal.TableDef) int {
+	idx := -1
+	for i, c := range tdef.Cols {
+		if c == colName {
+			idx = i
+			break
+		}
+	}
+
+	return idx
 }
 
 // addTableSchemaArgs adauga definitia tabelei care va fi creata in variabila
@@ -81,7 +108,7 @@ func addTableSchemaArgs(args []string, pos int, tdef *internal.TableDef) error {
 }
 
 // addUpdateToRecord ordoneaza noile datele in rand si verifica daca acestea exista
-func addUpdatesToRecord(args []string, pos int, rec *internal.Record) error {
+func addUpdatesToRecord(args []string, pos int, rec *internal.Record, tdef *internal.TableDef) error {
 	for _, arg := range args[pos:] {
 		parts := strings.SplitN(arg, "=", 2)
 		if len(parts) != 2 {
@@ -91,25 +118,25 @@ func addUpdatesToRecord(args []string, pos int, rec *internal.Record) error {
 		colName := parts[0]
 		colVal := parts[1]
 
-		idx := -1
-		for i, c := range rec.Cols {
-			if c == colName {
-				idx = i
-				break
-			}
-		}
-
+		idx := getRightIdx(colName, tdef)
 		if idx == -1 {
 			return fmt.Errorf("Coloana '%s' nu exista in acest tabel.", colName)
 		}
 
-		if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
+		colType := tdef.Types[idx]
+
+		switch colType {
+		case internal.TYPE_INT64:
+			valInt, err := strconv.ParseInt(colVal, 10, 64)
+			if err != nil {
+				return fmt.Errorf("valoarea pentru coloana '%s' trebuie sa fie un numar", colName)
+			}
 			rec.Vals[idx] = internal.Value{Type: internal.TYPE_INT64, I64: valInt}
-		} else {
+		case internal.TYPE_BYTES:
 			rec.Vals[idx] = internal.Value{Type: internal.TYPE_BYTES, Str: []byte(colVal)}
+
 		}
 	}
-
 	return nil
 }
 
@@ -144,9 +171,15 @@ var insertCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		tableName, db := parseNameAndOpenFile(args)
 		defer db.Close()
-		rec := &internal.Record{}
 
-		if err := addArgsToRecord(args, 1, rec); err != nil {
+		tdef := db.GetTableDef(tableName)
+		if tdef == nil {
+			fmt.Printf("Eroare: tabela '%s' nu a fost gasita in baza de date.\n", tableName)
+			return
+		}
+
+		rec := &internal.Record{}
+		if err := addArgsToRecord(args, 1, rec, tdef); err != nil {
 			fmt.Println(err)
 			return
 		}
@@ -168,9 +201,15 @@ var getRowCmd = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		tableName, db := parseNameAndOpenFile(args)
 		defer db.Close()
-		rec := &internal.Record{}
 
-		if err := addArgsToRecord(args, 1, rec); err != nil {
+		tdef := db.GetTableDef(tableName)
+		if tdef == nil {
+			fmt.Printf("Eroare: tabela '%s' nu a fost gasita in baza de date.\n", tableName)
+			return
+		}
+
+		rec := &internal.Record{}
+		if err := addArgsToRecord(args, 1, rec, tdef); err != nil {
 			fmt.Println(err)
 			return
 		}
@@ -233,8 +272,14 @@ var deleteCmd = &cobra.Command{
 		tableName, db := parseNameAndOpenFile(args)
 		defer db.Close()
 
+		tdef := db.GetTableDef(tableName)
+		if tdef == nil {
+			fmt.Printf("Eroare: tabela '%s' nu a fost gasita in baza de date.\n", tableName)
+			return
+		}
+
 		rec := &internal.Record{}
-		if err := addArgsToRecord(args, 1, rec); err != nil {
+		if err := addArgsToRecord(args, 1, rec, tdef); err != nil {
 			fmt.Println(err)
 			return
 		}
@@ -258,8 +303,14 @@ var updateCmd = &cobra.Command{
 		tableName, db := parseNameAndOpenFile(args)
 		primaryKeyArg := args[1]
 		defer db.Close()
-		rec := &internal.Record{}
 
+		tdef := db.GetTableDef(tableName)
+		if tdef == nil {
+			fmt.Printf("Eroare: tabela '%s' nu a fost gasita in baza de date.\n", tableName)
+			return
+		}
+
+		rec := &internal.Record{}
 		pkParts := strings.SplitN(primaryKeyArg, "=", 2)
 		if len(pkParts) != 2 {
 			fmt.Println("Format invalid pentru cheia primara. Foloseste col=val")
@@ -280,7 +331,7 @@ var updateCmd = &cobra.Command{
 			return
 		}
 
-		if err := addUpdatesToRecord(args, 2, rec); err != nil {
+		if err := addUpdatesToRecord(args, 2, rec, tdef); err != nil {
 			fmt.Println(err)
 			return
 		}
@@ -316,14 +367,20 @@ var rangeCmd = &cobra.Command{
 		tableName, db := parseNameAndOpenFile(args)
 		defer db.Close()
 
+		tdef := db.GetTableDef(tableName)
+		if tdef == nil {
+			fmt.Printf("Eroare: tabela '%s' nu a fost gasita in baza de date.\n", tableName)
+			return
+		}
+
 		recStart := &internal.Record{}
-		if err := addArgsToRecord([]string{args[1]}, 0, recStart); err != nil {
+		if err := addArgsToRecord([]string{args[1]}, 0, recStart, tdef); err != nil {
 			fmt.Println("Eroare la cheia de start:", err)
 			return
 		}
 
 		recEnd := &internal.Record{}
-		if err := addArgsToRecord([]string{args[2]}, 0, recEnd); err != nil {
+		if err := addArgsToRecord([]string{args[2]}, 0, recEnd, tdef); err != nil {
 			fmt.Println("Eroare la cheia de stop:", err)
 			return
 		}

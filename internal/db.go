@@ -446,3 +446,8 @@ func (db *DB) ScanAll(table string) (*Scanner, error) {
 
 	return sc, nil
 }
+
+// GetTableDef expune definitia tabelei pentru a fi folosita la validarea datelor
+func (db *DB) GetTableDef(name string) *TableDef {
+	return getTableDef(db, name)
+}
