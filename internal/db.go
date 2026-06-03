@@ -89,6 +89,10 @@ func dbGet(db *DB, tdef *TableDef, rec *Record) (bool, error) {
 		return false, nil
 	}
 
+	for len(values) < len(tdef.Cols) {
+		values = append(values, Value{})
+	}
+
 	for i := tdef.PKeys; i < len(tdef.Cols); i++ {
 		values[i].Type = tdef.Types[i]
 	}
@@ -142,7 +146,7 @@ func encodeKey(out []byte, prefix uint32, vals []Value) []byte {
 			out = append(out, size...)
 			out = append(out, v.Str...)
 		case TYPE_INT64:
-			binary.LittleEndian.PutUint64(buff[:], uint64(v.I64))
+			binary.BigEndian.PutUint64(buff[:], uint64(v.I64)+(1<<63))
 			out = append(out, buff...)
 		}
 	}
@@ -298,7 +302,22 @@ func (db *DB) TableNew(tdef *TableDef) error {
 
 	tdef.Prefix = nextPrefix
 	nextPrefix++
-	binary.LittleEndian.PutUint32(rec.Get("value").Str[:], nextPrefix)
+	newPrefixBuf := make([]byte, 4)
+	binary.LittleEndian.PutUint32(newPrefixBuf, nextPrefix)
+
+	idx := -1
+	for i, col := range rec.Cols {
+		if col == "value" {
+			idx = i
+			break
+		}
+	}
+
+	if idx != -1 {
+		rec.Vals[idx] = Value{Type: TYPE_BYTES, Str: newPrefixBuf}
+	} else {
+		rec.AddStr("value", newPrefixBuf)
+	}
 
 	_, err = dbUpdate(db, TDEF_META, *rec, MODE_UPSERT)
 
