@@ -23,8 +23,7 @@ folosind un B+Tree, MMap, un LRU Page Cache si un strat relational pentru tabele
 var insertCmd = &cobra.Command{
 	Use:   "insert [tabel] [col1=val1] [col2=val2]...",
 	Short: "Insereaza un rand nou intr-o tabela",
-	// Avem nevoie de minim 2 argumente: numele tabelei si cel putin o coloana
-	Args: cobra.MinimumNArgs(2),
+	Args:  cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
 		tableName := args[0]
 
@@ -84,7 +83,14 @@ var getRowCmd = &cobra.Command{
 				fmt.Printf("Format invalid: %s. Foloseste col=val\n", arg)
 				return
 			}
-			rec.AddStr(parts[0], []byte(parts[1]))
+			colName := parts[0]
+			colVal := parts[1]
+
+			if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
+				rec.AddInt64(colName, valInt)
+			} else {
+				rec.AddStr(colName, []byte(colVal))
+			}
 		}
 
 		found, err := db.Get(tableName, rec)
@@ -163,10 +169,137 @@ var createTableCmd = &cobra.Command{
 	},
 }
 
+// deleteCmd gestioneaza stergerea unui rand dintr-o tabela
+var deleteCmd = &cobra.Command{
+	Use:   "delete-row [tabel] [col_primara=valoare]",
+	Short: "Sterge un rand dintr-o tabela",
+	Args:  cobra.MinimumNArgs(2),
+	Run: func(cmd *cobra.Command, args []string) {
+		tableName := args[0]
+
+		db, err := internal.OpenDB(dbPath)
+		if err != nil {
+			fmt.Printf("Eroare la deschiderea DB: %v\n", err)
+			os.Exit(1)
+		}
+		defer db.Close()
+
+		rec := &internal.Record{}
+
+		for _, arg := range args[1:] {
+			parts := strings.SplitN(arg, "=", 2)
+			if len(parts) != 2 {
+				fmt.Printf("Format invalid: %s. Foloseste col=val\n", arg)
+				return
+			}
+
+			colName := parts[0]
+			colVal := parts[1]
+
+			if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
+				rec.AddInt64(colName, valInt)
+			} else {
+				rec.AddStr(colName, []byte(colVal))
+			}
+		}
+
+		found, err := db.Delete(tableName, *rec)
+		if err != nil {
+			fmt.Printf("Eroare la stergere: %v\n", err)
+			return
+		}
+
+		if found {
+			fmt.Println("Randul a fost sters.")
+			return
+		}
+	},
+}
+
+// updateCmd gestioneaza actualizarea unui rand din tabela
+var updateCmd = &cobra.Command{
+	Use:   "update-row [tabel] [col_primara=valoare] [col_de_modificat=valoare_noua]...",
+	Short: "Actualizeaza un rand dintr-o tabela",
+	Args:  cobra.MinimumNArgs(3),
+	Run: func(cmd *cobra.Command, args []string) {
+		tableName := args[0]
+		primaryKeyArg := args[1]
+
+		db, err := internal.OpenDB(dbPath)
+		if err != nil {
+			fmt.Printf("Eroare la deschiderea DB: %v\n", err)
+			os.Exit(1)
+		}
+		defer db.Close()
+
+		rec := &internal.Record{}
+		pkParts := strings.SplitN(primaryKeyArg, "=", 2)
+		if len(pkParts) != 2 {
+			fmt.Println("Format invalid pentru cheia primara. Foloseste col=val")
+			return
+		}
+
+		if valInt, err := strconv.ParseInt(pkParts[1], 10, 64); err == nil {
+			rec.AddInt64(pkParts[0], valInt)
+		} else {
+			rec.AddStr(pkParts[0], []byte(pkParts[1]))
+		}
+
+		found, err := db.Get(tableName, rec)
+		if err != nil {
+			fmt.Printf("Eroare la cautare: %v\n", err)
+			return
+		}
+		if !found {
+			fmt.Println("Randul nu a fost gasit.")
+			return
+		}
+
+		for _, arg := range args[2:] {
+			parts := strings.SplitN(arg, "=", 2)
+			if len(parts) != 2 {
+				fmt.Printf("Format invalid pentru date: %s. Foloseste col=val\n", arg)
+				return
+			}
+			colName := parts[0]
+			colVal := parts[1]
+
+			idx := -1
+			for i, c := range rec.Cols {
+				if c == colName {
+					idx = i
+					break
+				}
+			}
+
+			if idx == -1 {
+				fmt.Printf("Coloana '%s' nu exista in acest tabel.\n", colName)
+				return
+			}
+
+			if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
+				rec.Vals[idx] = internal.Value{Type: internal.TYPE_INT64, I64: valInt}
+			} else {
+				rec.Vals[idx] = internal.Value{Type: internal.TYPE_BYTES, Str: []byte(colVal)}
+			}
+		}
+
+		_, err = db.Update(tableName, *rec)
+		if err != nil {
+			fmt.Printf("Eroare la actualizare: %v\n", err)
+			return
+		}
+
+		fmt.Println("Randul a fost actualizat cu succes!")
+	},
+}
+
 func main() {
 	rootCmd.AddCommand(insertCmd)
 	rootCmd.AddCommand(getRowCmd)
 	rootCmd.AddCommand(createTableCmd)
+	rootCmd.AddCommand(deleteCmd)
+	rootCmd.AddCommand(updateCmd)
 
 	rootCmd.PersistentFlags().StringVarP(&dbPath, "db", "d", "data.db", "Calea catre fisierul bazei de date")
 
