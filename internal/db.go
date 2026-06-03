@@ -403,3 +403,23 @@ func (db *DB) Scan(table string, req *Scanner) error {
 
 	return nil
 }
+
+// OpenDB initializeaza si deschide baza de date la nivel relational,
+// incluzand deschiderea structurii interne KV
+func OpenDB(path string) (*DB, error) {
+	db := &DB{
+		Path: path,
+		kv:   KV{Path: path},
+	}
+
+	if err := db.kv.Open(); err != nil {
+		return nil, err
+	}
+
+	return db, nil
+}
+
+// Close inchide baza de date si elibereaza resursele de pe disc si din memorie
+func (db *DB) Close() error {
+	return db.kv.Close()
+}

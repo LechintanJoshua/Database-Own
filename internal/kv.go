@@ -32,6 +32,7 @@ type KV struct {
 	}
 
 	failed bool
+	cache  *LRUCache
 }
 
 // Open deschide fisierul din adresa Path
@@ -46,6 +47,7 @@ func (db *KV) Open() error {
 	db.free.set = db.pageWrite
 
 	db.page.updates = make(map[uint64][]byte)
+	db.cache = InitLRUCache()
 
 	fd, err := createFileSync(db.Path)
 
@@ -199,8 +201,14 @@ func (db *KV) pageRead(ptr uint64) []byte {
 	if node, ok := db.page.updates[ptr]; ok {
 		return node
 	}
+	if data := db.cache.Get(ptr); data != nil {
+		return data
+	}
 
-	return db.pageReadFile(ptr)
+	data := db.pageReadFile(ptr)
+	db.cache.Put(ptr, data)
+
+	return data
 }
 
 // pageReadFile citeste o pagina din memoria unui fisier

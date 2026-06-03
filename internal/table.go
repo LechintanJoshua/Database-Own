@@ -1,5 +1,7 @@
 package internal
 
+import "fmt"
+
 const (
 	TYPE_BYTES = 1
 	TYPE_INT64 = 2
@@ -68,4 +70,21 @@ func (rec *Record) Get(col string) *Value {
 	}
 
 	return nil
+}
+
+// PrintRecord afiseaza frumos coloanele si valorile unui rand
+func PrintRecord(rec *Record) {
+	fmt.Println("--- Rezultat ---")
+	for i, colName := range rec.Cols {
+		val := rec.Vals[i]
+
+		// Verificam ce contine valoarea pe baza field-urilor din Value
+		// (presupunand ca TYPE_BYTES si TYPE_INT64 sunt exportate, daca nu, folosim o abordare directa)
+		if len(val.Str) > 0 || val.Type == 0 /* inlocuieste cu internal.TYPE_BYTES daca e exportat */ {
+			fmt.Printf("%s: %s\n", colName, string(val.Str))
+		} else {
+			fmt.Printf("%s: %d\n", colName, val.I64)
+		}
+	}
+	fmt.Println("----------------")
 }

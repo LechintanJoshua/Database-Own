@@ -727,14 +727,14 @@ func iterNext(iter *BIter, level int) {
 // cheia la cea precedenta din frunza
 func iterPrev(iter *BIter, level int) {
 	if iter.pos[level] > 0 {
-		iter.pos[level]-- // miscare inapoi la frate
+		iter.pos[level]--
 	} else if level > 0 {
-		iterPrev(iter, level-1) // merg in parinte
+		iterPrev(iter, level-1)
 	} else {
-		iter.pos[len(iter.pos)-1]-- // nu mai sunt chei
+		iter.pos[len(iter.pos)-1]--
 	}
 
-	if level+1 < len(iter.pos) { // actualizeaza nodul copil
+	if level+1 < len(iter.pos) {
 		node := iter.path[level]
 		kid := BNode(iter.tree.get(node.getPtr(iter.pos[level])))
 		iter.path[level+1] = kid
