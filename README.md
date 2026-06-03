@@ -1,7 +1,5 @@
 # Database-Own
 
-# Database-Own
-
 * **Acest repository conține implementarea unui motor de baze de date.**
 * Proiectul este împărțit pe două branch-uri principale:
 
