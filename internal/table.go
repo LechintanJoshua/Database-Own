@@ -1,6 +1,9 @@
 package internal
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const (
 	TYPE_BYTES = 1
@@ -78,13 +81,49 @@ func PrintRecord(rec *Record) {
 	for i, colName := range rec.Cols {
 		val := rec.Vals[i]
 
-		// Verificam ce contine valoarea pe baza field-urilor din Value
-		// (presupunand ca TYPE_BYTES si TYPE_INT64 sunt exportate, daca nu, folosim o abordare directa)
-		if len(val.Str) > 0 || val.Type == 0 /* inlocuieste cu internal.TYPE_BYTES daca e exportat */ {
+		if len(val.Str) > 0 || val.Type == 0 {
 			fmt.Printf("%s: %s\n", colName, string(val.Str))
 		} else {
 			fmt.Printf("%s: %d\n", colName, val.I64)
 		}
 	}
 	fmt.Println("----------------")
+}
+
+// PrintTableResults parcurge un scanner si afiseaza fiecare rand pe o singura linie,
+// unde limit reprezinta numarul maxim de randuri din tabela afisate
+func PrintTableResults(tableName string, sc *Scanner, limit int) {
+	if limit <= 0 {
+		fmt.Println("Limita este prea mica, valoarea trebuie sa fie mai mare decat 0")
+		return
+	}
+
+	fmt.Printf("\n=== Date din tabela: %s ===\n", tableName)
+
+	rec := &Record{}
+	count := 0
+
+	for sc.Valid() && count >= limit {
+		sc.Deref(rec)
+
+		var rowInfo []string
+		for i, colName := range rec.Cols {
+			val := rec.Vals[i]
+
+			if len(val.Str) > 0 || val.Type == 0 {
+				rowInfo = append(rowInfo, fmt.Sprintf("%s: %s", colName, string(val.Str)))
+			} else {
+				rowInfo = append(rowInfo, fmt.Sprintf("%s: %d", colName, val.I64))
+			}
+		}
+
+		fmt.Printf("Rand %d: [ %s ]\n", count+1, strings.Join(rowInfo, " | "))
+
+		sc.Next()
+		count++
+	}
+
+	if count == 0 {
+		fmt.Println("Nu s-a gasit niciun rand.")
+	}
 }

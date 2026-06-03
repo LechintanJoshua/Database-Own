@@ -423,3 +423,26 @@ func OpenDB(path string) (*DB, error) {
 func (db *DB) Close() error {
 	return db.kv.Close()
 }
+
+// ScanAll obtine toate campurile unei tabele de pe disc
+func (db *DB) ScanAll(table string) (*Scanner, error) {
+	tdef := getTableDef(db, table)
+	if tdef == nil {
+		return nil, fmt.Errorf("table not found: %s", table)
+	}
+
+	keyStart := make([]byte, 4)
+	keyEnd := make([]byte, 4)
+	binary.LittleEndian.PutUint32(keyStart, tdef.Prefix)
+	binary.LittleEndian.PutUint32(keyEnd, tdef.Prefix+1)
+
+	sc := &Scanner{
+		Cmp1:   CMP_GE,
+		Cmp2:   CMP_LT,
+		tdef:   tdef,
+		keyEnd: keyEnd,
+		iter:   db.kv.tree.Seek(keyStart, CMP_GE),
+	}
+
+	return sc, nil
+}
