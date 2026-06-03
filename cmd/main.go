@@ -11,6 +11,8 @@ func main() {
 	rootCmd.AddCommand(createTableCmd)
 	rootCmd.AddCommand(deleteCmd)
 	rootCmd.AddCommand(updateCmd)
+	rootCmd.AddCommand(listCmd)
+	rootCmd.AddCommand(rangeCmd)
 
 	rootCmd.PersistentFlags().StringVarP(&dbPath, "db", "d", "data.db", "Calea catre fisierul bazei de date")
 

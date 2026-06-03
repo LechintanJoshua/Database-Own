@@ -294,6 +294,7 @@ var updateCmd = &cobra.Command{
 	},
 }
 
+// listCmd gestioneaza afisare unei tabele pana la o limita
 var listCmd = &cobra.Command{
 	Use:   "list-table [tabel] [limita]",
 	Short: "Afiseaza randurile dintr-o tabela pana la o limita data",
@@ -303,5 +304,42 @@ var listCmd = &cobra.Command{
 		defer db.Close()
 
 		checkLimAndPrintRows(tableName, db, args)
+	},
+}
+
+// rangeCmd gestioneaza cautarea si afisare din tabela intr-un interval
+var rangeCmd = &cobra.Command{
+	Use:   "list-range [tabel] [col=key_start] [col=key_end]",
+	Short: "Afiseaza randurile dintr-o tabela dintr-un interval dat",
+	Args:  cobra.MinimumNArgs(3),
+	Run: func(cmd *cobra.Command, args []string) {
+		tableName, db := parseNameAndOpenFile(args)
+		defer db.Close()
+
+		recStart := &internal.Record{}
+		if err := addArgsToRecord([]string{args[1]}, 0, recStart); err != nil {
+			fmt.Println("Eroare la cheia de start:", err)
+			return
+		}
+
+		recEnd := &internal.Record{}
+		if err := addArgsToRecord([]string{args[2]}, 0, recEnd); err != nil {
+			fmt.Println("Eroare la cheia de stop:", err)
+			return
+		}
+
+		sc := &internal.Scanner{
+			Cmp1: internal.CMP_GE,
+			Cmp2: internal.CMP_LE,
+			Key1: *recStart,
+			Key2: *recEnd,
+		}
+
+		if err := db.Scan(tableName, sc); err != nil {
+			fmt.Printf("Eroare la scanare: %v\n", err)
+			return
+		}
+
+		internal.PrintTableResults(tableName, sc, 0)
 	},
 }
