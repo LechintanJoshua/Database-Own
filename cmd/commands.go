@@ -19,44 +19,121 @@ var rootCmd = &cobra.Command{
 folosind un B+Tree, MMap, un LRU Page Cache si un strat relational pentru tabele.`,
 }
 
+// parseNameAndOpenFile obtine numele tabelei si deschide fisierul
+// in care se afla datele
+func parseNameAndOpenFile(args []string) (string, *internal.DB) {
+	tableName := args[0]
+
+	db, err := internal.OpenDB(dbPath)
+	if err != nil {
+		fmt.Printf("Eroare la deschiderea DB: %v\n", err)
+		os.Exit(1)
+	}
+
+	return tableName, db
+}
+
+// addArgsToRecord preia datele date de pe linia de comanda
+// si le adauga intr-un rand, returnand o eroare daca formatul e gresit
+func addArgsToRecord(args []string, pos int, rec *internal.Record) error {
+	for _, arg := range args[pos:] {
+		parts := strings.SplitN(arg, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("format invalid pentru date: %s. Foloseste col=val", arg)
+		}
+		colName := parts[0]
+		colVal := parts[1]
+
+		if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
+			rec.AddInt64(colName, valInt)
+		} else {
+			rec.AddStr(colName, []byte(colVal))
+		}
+	}
+	return nil
+}
+
+// addTableSchemaArgs adauga definitia tabelei care va fi creata in variabila
+// si verifica daca formatul respecta comanda
+func addTableSchemaArgs(args []string, pos int, tdef *internal.TableDef) error {
+	for _, arg := range args[pos:] {
+		parts := strings.SplitN(arg, ":", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("format invalid pentru coloana: %s. Foloseste nume:tip", arg)
+		}
+
+		colName := parts[0]
+		colTypeStr := strings.ToLower(parts[1])
+
+		tdef.Cols = append(tdef.Cols, colName)
+
+		switch colTypeStr {
+		case "int64", "int":
+			tdef.Types = append(tdef.Types, internal.TYPE_INT64)
+		case "string", "bytes":
+			tdef.Types = append(tdef.Types, internal.TYPE_BYTES)
+		default:
+			return fmt.Errorf("Tip de date necunoscut: %s. Foloseste 'int64' sau 'string'", colTypeStr)
+		}
+	}
+
+	return nil
+}
+
+// addUpdateToRecord ordoneaza noile datele in rand si verifica daca acestea exista
+func addUpdatesToRecord(args []string, pos int, rec *internal.Record) error {
+	for _, arg := range args[pos:] {
+		parts := strings.SplitN(arg, "=", 2)
+		if len(parts) != 2 {
+			return fmt.Errorf("Format invalid pentru date: %s. Foloseste col=val", arg)
+		}
+
+		colName := parts[0]
+		colVal := parts[1]
+
+		idx := -1
+		for i, c := range rec.Cols {
+			if c == colName {
+				idx = i
+				break
+			}
+		}
+
+		if idx == -1 {
+			return fmt.Errorf("Coloana '%s' nu exista in acest tabel.", colName)
+		}
+
+		if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
+			rec.Vals[idx] = internal.Value{Type: internal.TYPE_INT64, I64: valInt}
+		} else {
+			rec.Vals[idx] = internal.Value{Type: internal.TYPE_BYTES, Str: []byte(colVal)}
+		}
+	}
+
+	return nil
+}
+
 // insertCmd gestioneaza inserarea unui rand intreg intr-un tabel
 var insertCmd = &cobra.Command{
 	Use:   "insert [tabel] [col1=val1] [col2=val2]...",
 	Short: "Insereaza un rand nou intr-o tabela",
 	Args:  cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		tableName := args[0]
-
-		db, err := internal.OpenDB(dbPath)
-		if err != nil {
-			fmt.Printf("Eroare la deschiderea DB: %v\n", err)
-			os.Exit(1)
-		}
+		tableName, db := parseNameAndOpenFile(args)
 		defer db.Close()
-
 		rec := &internal.Record{}
 
-		for _, arg := range args[1:] {
-			parts := strings.SplitN(arg, "=", 2)
-			if len(parts) != 2 {
-				fmt.Printf("Format invalid pentru date: %s. Foloseste col=val\n", arg)
-				return
-			}
-			colName := parts[0]
-			colVal := parts[1]
-
-			if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
-				rec.AddInt64(colName, valInt)
-			} else {
-				rec.AddStr(colName, []byte(colVal))
-			}
+		if err := addArgsToRecord(args, 1, rec); err != nil {
+			fmt.Println(err)
+			return
 		}
 
-		_, err = db.Insert(tableName, *rec)
-		if err != nil {
+		if _, err := db.Insert(tableName, *rec); err != nil {
 			fmt.Printf("Eroare la inserare: %v\n", err)
 			return
 		}
+
+		fmt.Println("Randul a fost inserat cu succes.")
 	},
 }
 
@@ -66,40 +143,19 @@ var getRowCmd = &cobra.Command{
 	Short: "Extrage un rand din baza de date",
 	Args:  cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		tableName := args[0]
-
-		db, err := internal.OpenDB(dbPath)
-		if err != nil {
-			fmt.Printf("Eroare la deschiderea DB: %v\n", err)
-			os.Exit(1)
-		}
+		tableName, db := parseNameAndOpenFile(args)
 		defer db.Close()
-
 		rec := &internal.Record{}
 
-		for _, arg := range args[1:] {
-			parts := strings.SplitN(arg, "=", 2)
-			if len(parts) != 2 {
-				fmt.Printf("Format invalid: %s. Foloseste col=val\n", arg)
-				return
-			}
-			colName := parts[0]
-			colVal := parts[1]
-
-			if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
-				rec.AddInt64(colName, valInt)
-			} else {
-				rec.AddStr(colName, []byte(colVal))
-			}
-		}
-
-		found, err := db.Get(tableName, rec)
-		if err != nil {
-			fmt.Printf("Eroare la cautare: %v\n", err)
+		if err := addArgsToRecord(args, 1, rec); err != nil {
+			fmt.Println(err)
 			return
 		}
 
-		if !found {
+		if found, err := db.Get(tableName, rec); err != nil {
+			fmt.Printf("Eroare la cautare: %v\n", err)
+			return
+		} else if !found {
 			fmt.Println("Randul nu a fost gasit.")
 			return
 		}
@@ -117,7 +173,8 @@ var createTableCmd = &cobra.Command{
 	Minim: nume_tabel, nr_chei, si macar o coloana`,
 	Args: cobra.MinimumNArgs(3),
 	Run: func(cmd *cobra.Command, args []string) {
-		tableName := args[0]
+		tableName, db := parseNameAndOpenFile(args)
+		defer db.Close()
 
 		pkeysCount, err := strconv.Atoi(args[1])
 		if err != nil {
@@ -130,35 +187,10 @@ var createTableCmd = &cobra.Command{
 			PKeys: pkeysCount,
 		}
 
-		for _, arg := range args[2:] {
-			parts := strings.SplitN(arg, ":", 2)
-			if len(parts) != 2 {
-				fmt.Printf("Format invalid pentru coloana: %s. Foloseste nume:tip\n", arg)
-				return
-			}
-
-			colName := parts[0]
-			colTypeStr := strings.ToLower(parts[1])
-
-			tdef.Cols = append(tdef.Cols, colName)
-
-			switch colTypeStr {
-			case "int64", "int":
-				tdef.Types = append(tdef.Types, internal.TYPE_INT64)
-			case "string", "bytes":
-				tdef.Types = append(tdef.Types, internal.TYPE_BYTES)
-			default:
-				fmt.Printf("Tip de date necunoscut: %s. Foloseste 'int64' sau 'string'\n", colTypeStr)
-				return
-			}
+		if err := addTableSchemaArgs(args, 2, tdef); err != nil {
+			fmt.Println(err)
+			return
 		}
-
-		db, err := internal.OpenDB(dbPath)
-		if err != nil {
-			fmt.Printf("Eroare la deschiderea DB: %v\n", err)
-			os.Exit(1)
-		}
-		defer db.Close()
 
 		if err := db.TableNew(tdef); err != nil {
 			fmt.Printf("Eroare la crearea tabelei: %v\n", err)
@@ -175,41 +207,19 @@ var deleteCmd = &cobra.Command{
 	Short: "Sterge un rand dintr-o tabela",
 	Args:  cobra.MinimumNArgs(2),
 	Run: func(cmd *cobra.Command, args []string) {
-		tableName := args[0]
-
-		db, err := internal.OpenDB(dbPath)
-		if err != nil {
-			fmt.Printf("Eroare la deschiderea DB: %v\n", err)
-			os.Exit(1)
-		}
+		tableName, db := parseNameAndOpenFile(args)
 		defer db.Close()
 
 		rec := &internal.Record{}
-
-		for _, arg := range args[1:] {
-			parts := strings.SplitN(arg, "=", 2)
-			if len(parts) != 2 {
-				fmt.Printf("Format invalid: %s. Foloseste col=val\n", arg)
-				return
-			}
-
-			colName := parts[0]
-			colVal := parts[1]
-
-			if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
-				rec.AddInt64(colName, valInt)
-			} else {
-				rec.AddStr(colName, []byte(colVal))
-			}
-		}
-
-		found, err := db.Delete(tableName, *rec)
-		if err != nil {
-			fmt.Printf("Eroare la stergere: %v\n", err)
+		if err := addArgsToRecord(args, 1, rec); err != nil {
+			fmt.Println(err)
 			return
 		}
 
-		if found {
+		if found, err := db.Delete(tableName, *rec); err != nil {
+			fmt.Printf("Eroare la stergere: %v\n", err)
+			return
+		} else if found {
 			fmt.Println("Randul a fost sters.")
 			return
 		}
@@ -222,17 +232,11 @@ var updateCmd = &cobra.Command{
 	Short: "Actualizeaza un rand dintr-o tabela",
 	Args:  cobra.MinimumNArgs(3),
 	Run: func(cmd *cobra.Command, args []string) {
-		tableName := args[0]
+		tableName, db := parseNameAndOpenFile(args)
 		primaryKeyArg := args[1]
-
-		db, err := internal.OpenDB(dbPath)
-		if err != nil {
-			fmt.Printf("Eroare la deschiderea DB: %v\n", err)
-			os.Exit(1)
-		}
 		defer db.Close()
-
 		rec := &internal.Record{}
+
 		pkParts := strings.SplitN(primaryKeyArg, "=", 2)
 		if len(pkParts) != 2 {
 			fmt.Println("Format invalid pentru cheia primara. Foloseste col=val")
@@ -245,47 +249,20 @@ var updateCmd = &cobra.Command{
 			rec.AddStr(pkParts[0], []byte(pkParts[1]))
 		}
 
-		found, err := db.Get(tableName, rec)
-		if err != nil {
+		if found, err := db.Get(tableName, rec); err != nil {
 			fmt.Printf("Eroare la cautare: %v\n", err)
 			return
-		}
-		if !found {
+		} else if !found {
 			fmt.Println("Randul nu a fost gasit.")
 			return
 		}
 
-		for _, arg := range args[2:] {
-			parts := strings.SplitN(arg, "=", 2)
-			if len(parts) != 2 {
-				fmt.Printf("Format invalid pentru date: %s. Foloseste col=val\n", arg)
-				return
-			}
-			colName := parts[0]
-			colVal := parts[1]
-
-			idx := -1
-			for i, c := range rec.Cols {
-				if c == colName {
-					idx = i
-					break
-				}
-			}
-
-			if idx == -1 {
-				fmt.Printf("Coloana '%s' nu exista in acest tabel.\n", colName)
-				return
-			}
-
-			if valInt, err := strconv.ParseInt(colVal, 10, 64); err == nil {
-				rec.Vals[idx] = internal.Value{Type: internal.TYPE_INT64, I64: valInt}
-			} else {
-				rec.Vals[idx] = internal.Value{Type: internal.TYPE_BYTES, Str: []byte(colVal)}
-			}
+		if err := addUpdatesToRecord(args, 2, rec); err != nil {
+			fmt.Println(err)
+			return
 		}
 
-		_, err = db.Update(tableName, *rec)
-		if err != nil {
+		if _, err := db.Update(tableName, *rec); err != nil {
 			fmt.Printf("Eroare la actualizare: %v\n", err)
 			return
 		}
